@@ -30,9 +30,9 @@ router.use(authMiddleware.authenticate);
  *               items:
  *                 type: object
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  *   post:
  *     summary: Create attendance record
  *     description: Create a new attendance record
@@ -50,11 +50,11 @@ router.use(authMiddleware.authenticate);
  *       201:
  *         description: Attendance record created successfully
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  */
 router.get(
     '/',
@@ -88,9 +88,9 @@ router.get(
  *               items:
  *                 type: object
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Employee not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get(
     '/employee/:employeeId',
@@ -118,9 +118,9 @@ router.get(
  *       200:
  *         description: Attendance stats retrieved successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Employee not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get(
     '/employee/:employeeId/stats',
@@ -148,9 +148,9 @@ router.get(
  *       200:
  *         description: Attendance record retrieved successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Attendance record not found
+ *         $ref: '#/components/responses/NotFound'
  *   put:
  *     summary: Update attendance record
  *     description: Update an attendance record
@@ -174,9 +174,9 @@ router.get(
  *       200:
  *         description: Attendance record updated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Attendance record not found
+ *         $ref: '#/components/responses/NotFound'
  *   delete:
  *     summary: Delete attendance record
  *     description: Delete an attendance record
@@ -194,9 +194,9 @@ router.get(
  *       200:
  *         description: Attendance record deleted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Attendance record not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get(
     '/:id',

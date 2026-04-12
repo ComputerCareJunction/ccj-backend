@@ -1,46 +1,48 @@
 import { BaseRepository } from './BaseRepository';
 import { Order, IOrder } from '../models/Order';
 
+function generateOrderNumber(): string {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const rand = Math.floor(Math.random() * 1_000_000)
+        .toString()
+        .padStart(6, '0');
+    return `ORD-${y}${m}${day}-${rand}`;
+}
+
 export class OrderRepository extends BaseRepository<Order> {
     constructor() {
         super('tbl_orders');
     }
 
     async findAll(): Promise<Order[]> {
-        const result = await this.query(
-            `SELECT * FROM ${this.tableName} ORDER BY created_at DESC`
-        );
-        return result.rows.map(row => this.mapRowToOrder(row));
+        const result = await this.query(`SELECT * FROM ${this.tableName} ORDER BY created_at DESC`);
+        return result.rows.map((row) => this.mapRowToOrder(row));
     }
 
     async findById(id: number): Promise<Order | null> {
-        const result = await this.query(
-            `SELECT * FROM ${this.tableName} WHERE id = $1`,
-            [id]
-        );
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = ?`, [id]);
         if (result.rows.length === 0) return null;
         return this.mapRowToOrder(result.rows[0]);
     }
 
     async findByOrderNumber(orderNumber: string): Promise<Order | null> {
-        const result = await this.query(
-            `SELECT * FROM ${this.tableName} WHERE order_number = $1`,
-            [orderNumber]
-        );
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE order_number = ?`, [
+            orderNumber,
+        ]);
         if (result.rows.length === 0) return null;
         return this.mapRowToOrder(result.rows[0]);
     }
 
     async create(data: Partial<IOrder>): Promise<Order> {
-        // Generate order number
-        const orderNumberResult = await this.query('SELECT generate_order_number() AS order_number');
-        const orderNumber = orderNumberResult.rows[0].order_number;
+        const orderNumber = generateOrderNumber();
 
-        const result = await this.query(
+        const ins = await this.query(
             `INSERT INTO ${this.tableName} 
             (order_number, customer_name, customer_email, customer_phone, shipping_address, city, pincode, payment_method, status, total_amount, items, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING *`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 orderNumber,
                 data.customer_name,
@@ -56,20 +58,24 @@ export class OrderRepository extends BaseRepository<Order> {
                 data.notes || null,
             ]
         );
-        return this.mapRowToOrder(result.rows[0]);
+        const insertId = ins.insertId;
+        if (!insertId) {
+            throw new Error('Failed to create order');
+        }
+        const fetched = await this.selectByIdAfterInsert(Number(insertId));
+        return this.mapRowToOrder(fetched.rows[0]);
     }
 
     async update(id: number, data: Partial<IOrder>): Promise<Order | null> {
         const updates: string[] = [];
         const values: any[] = [];
-        let paramIndex = 1;
 
         if (data.status !== undefined) {
-            updates.push(`status = $${paramIndex++}`);
+            updates.push(`status = ?`);
             values.push(data.status);
         }
         if (data.notes !== undefined) {
-            updates.push(`notes = $${paramIndex++}`);
+            updates.push(`notes = ?`);
             values.push(data.notes);
         }
 
@@ -78,29 +84,23 @@ export class OrderRepository extends BaseRepository<Order> {
         }
 
         values.push(id);
-        const result = await this.query(
-            `UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-            values
-        );
+        await this.query(`UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = ?`, values);
 
-        if (result.rows.length === 0) return null;
-        return this.mapRowToOrder(result.rows[0]);
+        return this.findById(id);
     }
 
     async delete(id: number): Promise<boolean> {
-        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = $1`, [id]);
-        return result.rowCount !== null && result.rowCount > 0;
+        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = ?`, [id]);
+        return (result.rowCount ?? 0) > 0;
     }
 
     private mapRowToOrder(row: any): Order {
-        // Safely parse items JSON
         let items = [];
         if (row.items) {
             if (typeof row.items === 'string') {
                 try {
                     items = JSON.parse(row.items);
                 } catch (error) {
-                    // If JSON parsing fails, treat as empty array
                     console.warn(`Failed to parse items JSON for order ${row.id}:`, error);
                     items = [];
                 }
@@ -128,4 +128,3 @@ export class OrderRepository extends BaseRepository<Order> {
         });
     }
 }
-

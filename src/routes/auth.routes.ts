@@ -37,17 +37,11 @@ const authController = new AuthController();
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 token:
- *                   type: string
- *                   description: JWT token
- *                 user:
- *                   $ref: '#/components/schemas/User'
+ *               $ref: '#/components/schemas/LoginResponse'
  *       401:
- *         description: Invalid credentials
+ *         $ref: '#/components/responses/InvalidCredentials'
  *       400:
- *         description: Missing required fields
+ *         $ref: '#/components/responses/BadRequest'
  */
 router.post('/login', authController.login);
 
@@ -90,16 +84,109 @@ router.post('/login', authController.login);
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                 user:
- *                   $ref: '#/components/schemas/User'
+ *               $ref: '#/components/schemas/RegisterResponse'
  *       400:
- *         description: Validation error or user already exists
+ *         $ref: '#/components/responses/BadRequest'
  */
 router.post('/register', authController.register);
+
+/**
+ * @swagger
+ * /api/auth/forgot-password:
+ *   post:
+ *     summary: Request password reset OTP
+ *     description: Sends a 6-digit code to the email if an account exists (404 if not).
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *     responses:
+ *       200:
+ *         description: Code sent (only when account exists)
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ */
+router.post('/forgot-password', authController.forgotPassword);
+
+/**
+ * @swagger
+ * /api/auth/verify-forgot-password-otp:
+ *   post:
+ *     summary: Verify OTP and get reset token
+ *     description: Returns a short-lived JWT to use with reset-password.
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: OTP verified; resetToken issued
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ */
+router.post('/verify-forgot-password-otp', authController.verifyForgotPasswordOtp);
+
+/**
+ * @swagger
+ * /api/auth/reset-password:
+ *   post:
+ *     summary: Set new password using reset token
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - resetToken
+ *               - newPassword
+ *               - confirmPassword
+ *             properties:
+ *               resetToken:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *                 format: password
+ *               confirmPassword:
+ *                 type: string
+ *                 format: password
+ *     responses:
+ *       200:
+ *         description: Password updated
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+router.post('/reset-password', authController.resetPassword);
 
 /**
  * @swagger
@@ -119,7 +206,7 @@ router.post('/register', authController.register);
  *             schema:
  *               $ref: '#/components/schemas/User'
  *       401:
- *         description: Unauthorized - Invalid or missing token
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/profile', authMiddleware.authenticate, authController.getProfile);
 

@@ -4,7 +4,6 @@ import {
     IDashboardPermission,
     DashboardSection,
 } from '../models/DashboardPermission';
-import { QueryResult } from 'pg';
 
 export class DashboardPermissionRepository extends BaseRepository<DashboardPermission> {
     constructor() {
@@ -13,20 +12,20 @@ export class DashboardPermissionRepository extends BaseRepository<DashboardPermi
 
     async findAll(): Promise<DashboardPermission[]> {
         const result = await this.query(`SELECT * FROM ${this.tableName} ORDER BY user_id, section`);
-        return result.rows.map(row => this.mapRowToPermission(row));
+        return result.rows.map((row) => this.mapRowToPermission(row));
     }
 
     async findById(id: number): Promise<DashboardPermission | null> {
-        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = $1`, [id]);
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = ?`, [id]);
         return result.rows.length > 0 ? this.mapRowToPermission(result.rows[0]) : null;
     }
 
     async findByUserId(userId: number): Promise<DashboardPermission[]> {
         const result = await this.query(
-            `SELECT * FROM ${this.tableName} WHERE user_id = $1 ORDER BY section`,
+            `SELECT * FROM ${this.tableName} WHERE user_id = ? ORDER BY section`,
             [userId]
         );
-        return result.rows.map(row => this.mapRowToPermission(row));
+        return result.rows.map((row) => this.mapRowToPermission(row));
     }
 
     async findByUserAndSection(
@@ -34,17 +33,16 @@ export class DashboardPermissionRepository extends BaseRepository<DashboardPermi
         section: DashboardSection
     ): Promise<DashboardPermission | null> {
         const result = await this.query(
-            `SELECT * FROM ${this.tableName} WHERE user_id = $1 AND section = $2`,
+            `SELECT * FROM ${this.tableName} WHERE user_id = ? AND section = ?`,
             [userId, section]
         );
         return result.rows.length > 0 ? this.mapRowToPermission(result.rows[0]) : null;
     }
 
     async create(data: Partial<IDashboardPermission>): Promise<DashboardPermission> {
-        const result = await this.query(
+        const ins = await this.query(
             `INSERT INTO ${this.tableName} (user_id, section, can_view, can_create, can_update, can_delete)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING *`,
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [
                 data.user_id!,
                 data.section!,
@@ -54,28 +52,32 @@ export class DashboardPermissionRepository extends BaseRepository<DashboardPermi
                 data.can_delete ?? false,
             ]
         );
-        return this.mapRowToPermission(result.rows[0]);
+        const insertId = ins.insertId;
+        if (!insertId) {
+            throw new Error('Failed to create dashboard permission');
+        }
+        const fetched = await this.selectByIdAfterInsert(Number(insertId));
+        return this.mapRowToPermission(fetched.rows[0]);
     }
 
     async update(id: number, data: Partial<IDashboardPermission>): Promise<DashboardPermission | null> {
         const updates: string[] = [];
         const values: any[] = [];
-        let paramCount = 1;
 
         if (data.can_view !== undefined) {
-            updates.push(`can_view = $${paramCount++}`);
+            updates.push(`can_view = ?`);
             values.push(data.can_view);
         }
         if (data.can_create !== undefined) {
-            updates.push(`can_create = $${paramCount++}`);
+            updates.push(`can_create = ?`);
             values.push(data.can_create);
         }
         if (data.can_update !== undefined) {
-            updates.push(`can_update = $${paramCount++}`);
+            updates.push(`can_update = ?`);
             values.push(data.can_update);
         }
         if (data.can_delete !== undefined) {
-            updates.push(`can_delete = $${paramCount++}`);
+            updates.push(`can_delete = ?`);
             values.push(data.can_delete);
         }
 
@@ -84,25 +86,20 @@ export class DashboardPermissionRepository extends BaseRepository<DashboardPermi
         }
 
         values.push(id);
-        const result = await this.query(
-            `UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-            values
-        );
-        return result.rows.length > 0 ? this.mapRowToPermission(result.rows[0]) : null;
+        await this.query(`UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = ?`, values);
+        return this.findById(id);
     }
 
     async upsertByUserAndSection(data: IDashboardPermission): Promise<DashboardPermission> {
-        const result = await this.query(
+        await this.query(
             `INSERT INTO ${this.tableName} (user_id, section, can_view, can_create, can_update, can_delete)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (user_id, section)
-             DO UPDATE SET
-                 can_view = EXCLUDED.can_view,
-                 can_create = EXCLUDED.can_create,
-                 can_update = EXCLUDED.can_update,
-                 can_delete = EXCLUDED.can_delete,
-                 updated_at = CURRENT_TIMESTAMP
-             RETURNING *`,
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                 can_view = VALUES(can_view),
+                 can_create = VALUES(can_create),
+                 can_update = VALUES(can_update),
+                 can_delete = VALUES(can_delete),
+                 updated_at = CURRENT_TIMESTAMP`,
             [
                 data.user_id,
                 data.section,
@@ -112,17 +109,22 @@ export class DashboardPermissionRepository extends BaseRepository<DashboardPermi
                 data.can_delete,
             ]
         );
-        return this.mapRowToPermission(result.rows[0]);
+
+        const found = await this.findByUserAndSection(data.user_id, data.section);
+        if (!found) {
+            throw new Error('Failed to upsert dashboard permission');
+        }
+        return found;
     }
 
     async delete(id: number): Promise<boolean> {
-        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = $1 RETURNING id`, [id]);
-        return result.rows.length > 0;
+        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = ?`, [id]);
+        return (result.rowCount ?? 0) > 0;
     }
 
     async deleteByUserId(userId: number): Promise<boolean> {
-        const result = await this.query(`DELETE FROM ${this.tableName} WHERE user_id = $1 RETURNING id`, [userId]);
-        return result.rowCount ? result.rowCount > 0 : false;
+        const result = await this.query(`DELETE FROM ${this.tableName} WHERE user_id = ?`, [userId]);
+        return (result.rowCount ?? 0) > 0;
     }
 
     private mapRowToPermission(row: any): DashboardPermission {
@@ -139,4 +141,3 @@ export class DashboardPermissionRepository extends BaseRepository<DashboardPermi
         });
     }
 }
-

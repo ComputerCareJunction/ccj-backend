@@ -55,17 +55,13 @@ router.use(authMiddleware.authenticate);
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 url:
- *                   type: string
- *                   description: Cloudinary image URL
+ *               $ref: '#/components/schemas/UploadImageResponse'
  *       400:
- *         description: Invalid file format or size exceeded
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       500:
- *         description: Upload failed
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.post('/image', upload.single('image'), uploadController.uploadImage);
 

@@ -8,19 +8,18 @@ export class TicketRepository extends BaseRepository<Ticket> {
 
     async findAll(): Promise<Ticket[]> {
         const result = await this.query(`SELECT * FROM ${this.tableName} ORDER BY created_at DESC`);
-        return result.rows.map(row => this.mapRowToTicket(row));
+        return result.rows.map((row) => this.mapRowToTicket(row));
     }
 
     async findById(id: number): Promise<Ticket | null> {
-        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = $1`, [id]);
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = ?`, [id]);
         return result.rows.length > 0 ? this.mapRowToTicket(result.rows[0]) : null;
     }
 
     async create(data: Partial<ITicket>): Promise<Ticket> {
-        const result = await this.query(
+        const ins = await this.query(
             `INSERT INTO ${this.tableName} (ticket_name, ticket_type, requested_by, phone_number, message, status, priority)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING *`,
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
                 data.ticket_name,
                 data.ticket_type,
@@ -31,40 +30,44 @@ export class TicketRepository extends BaseRepository<Ticket> {
                 data.priority || 'high',
             ]
         );
-        return this.mapRowToTicket(result.rows[0]);
+        const insertId = ins.insertId;
+        if (!insertId) {
+            throw new Error('Failed to create ticket');
+        }
+        const fetched = await this.selectByIdAfterInsert(Number(insertId));
+        return this.mapRowToTicket(fetched.rows[0]);
     }
 
     async update(id: number, data: Partial<ITicket>): Promise<Ticket | null> {
         const updates: string[] = [];
         const values: any[] = [];
-        let paramCount = 1;
 
         if (data.ticket_name !== undefined) {
-            updates.push(`ticket_name = $${paramCount++}`);
+            updates.push(`ticket_name = ?`);
             values.push(data.ticket_name);
         }
         if (data.ticket_type !== undefined) {
-            updates.push(`ticket_type = $${paramCount++}`);
+            updates.push(`ticket_type = ?`);
             values.push(data.ticket_type);
         }
         if (data.requested_by !== undefined) {
-            updates.push(`requested_by = $${paramCount++}`);
+            updates.push(`requested_by = ?`);
             values.push(data.requested_by);
         }
         if (data.phone_number !== undefined) {
-            updates.push(`phone_number = $${paramCount++}`);
+            updates.push(`phone_number = ?`);
             values.push(data.phone_number);
         }
         if (data.message !== undefined) {
-            updates.push(`message = $${paramCount++}`);
+            updates.push(`message = ?`);
             values.push(data.message);
         }
         if (data.status !== undefined) {
-            updates.push(`status = $${paramCount++}`);
+            updates.push(`status = ?`);
             values.push(data.status);
         }
         if (data.priority !== undefined) {
-            updates.push(`priority = $${paramCount++}`);
+            updates.push(`priority = ?`);
             values.push(data.priority);
         }
 
@@ -75,25 +78,25 @@ export class TicketRepository extends BaseRepository<Ticket> {
         updates.push(`updated_at = NOW()`);
         values.push(id);
 
-        const result = await this.query(
-            `UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-            values
-        );
+        await this.query(`UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = ?`, values);
 
-        return result.rows.length > 0 ? this.mapRowToTicket(result.rows[0]) : null;
+        return this.findById(id);
     }
 
-    async updateStatus(id: number, status: 'todo' | 'in_progress' | 'done' | 'closed'): Promise<Ticket | null> {
-        const result = await this.query(
-            `UPDATE ${this.tableName} SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+    async updateStatus(
+        id: number,
+        status: 'todo' | 'in_progress' | 'done' | 'closed'
+    ): Promise<Ticket | null> {
+        await this.query(
+            `UPDATE ${this.tableName} SET status = ?, updated_at = NOW() WHERE id = ?`,
             [status, id]
         );
-        return result.rows.length > 0 ? this.mapRowToTicket(result.rows[0]) : null;
+        return this.findById(id);
     }
 
     async delete(id: number): Promise<boolean> {
-        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = $1`, [id]);
-        return result.rowCount ? result.rowCount > 0 : false;
+        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = ?`, [id]);
+        return (result.rowCount ?? 0) > 0;
     }
 
     private mapRowToTicket(row: any): Ticket {
@@ -111,4 +114,3 @@ export class TicketRepository extends BaseRepository<Ticket> {
         });
     }
 }
-

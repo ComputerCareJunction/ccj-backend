@@ -46,7 +46,7 @@ router.get('/', productController.getAllProducts);
  *             schema:
  *               $ref: '#/components/schemas/Product'
  *       404:
- *         description: Product not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/slug/:slug', productController.getProductBySlug);
 

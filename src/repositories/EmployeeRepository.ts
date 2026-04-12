@@ -1,6 +1,5 @@
 import { BaseRepository } from './BaseRepository';
 import { Employee, IEmployee, EmployeeStatus } from '../models/Employee';
-import { QueryResult } from 'pg';
 
 export class EmployeeRepository extends BaseRepository<Employee> {
     constructor() {
@@ -9,38 +8,39 @@ export class EmployeeRepository extends BaseRepository<Employee> {
 
     async findAll(): Promise<Employee[]> {
         const result = await this.query(`SELECT * FROM ${this.tableName} ORDER BY created_at DESC`);
-        return result.rows.map(row => this.mapRowToEmployee(row));
+        return result.rows.map((row) => this.mapRowToEmployee(row));
     }
 
     async findById(id: number): Promise<Employee | null> {
-        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = $1`, [id]);
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = ?`, [id]);
         return result.rows.length > 0 ? this.mapRowToEmployee(result.rows[0]) : null;
     }
 
     async findByEmployeeId(employeeId: string): Promise<Employee | null> {
-        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE employee_id = $1`, [employeeId]);
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE employee_id = ?`, [
+            employeeId,
+        ]);
         return result.rows.length > 0 ? this.mapRowToEmployee(result.rows[0]) : null;
     }
 
     async findByEmail(email: string): Promise<Employee | null> {
-        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE LOWER(email) = LOWER($1)`, [email]);
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE LOWER(email) = LOWER(?)`, [
+            email,
+        ]);
         return result.rows.length > 0 ? this.mapRowToEmployee(result.rows[0]) : null;
     }
 
     async generateEmployeeId(): Promise<string> {
-        // Get the maximum numeric part from existing employee IDs
         const result = await this.query(
             `SELECT employee_id FROM ${this.tableName} WHERE employee_id LIKE 'CCJ-%' ORDER BY employee_id DESC LIMIT 1`
         );
-        
+
         if (result.rows.length > 0) {
             const lastEmployeeId = result.rows[0].employee_id;
-            const numericPart = parseInt(lastEmployeeId.replace('CCJ-', ''));
+            const numericPart = parseInt(lastEmployeeId.replace('CCJ-', ''), 10);
             if (!isNaN(numericPart)) {
-                // Generate next ID based on highest existing ID
-                // Check if this ID already exists (in case of gaps or deletions)
                 let counter = 0;
-                while (counter < 100) { // Safety limit
+                while (counter < 100) {
                     const nextNum = numericPart + 1 + counter;
                     const newEmployeeId = `CCJ-${String(nextNum).padStart(2, '0')}`;
                     const exists = await this.findByEmployeeId(newEmployeeId);
@@ -49,12 +49,10 @@ export class EmployeeRepository extends BaseRepository<Employee> {
                     }
                     counter++;
                 }
-                // Fallback: use timestamp if all sequential IDs are taken
                 return `CCJ-${Date.now().toString().slice(-4)}`;
             }
         }
-        
-        // If no existing employees, start with CCJ-01
+
         return 'CCJ-01';
     }
 
@@ -64,10 +62,9 @@ export class EmployeeRepository extends BaseRepository<Employee> {
             employeeId = await this.generateEmployeeId();
         }
 
-        const result = await this.query(
+        const ins = await this.query(
             `INSERT INTO ${this.tableName} (employee_id, name, email, phone, position, department, hire_date, status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING *`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 employeeId,
                 data.name!,
@@ -79,40 +76,44 @@ export class EmployeeRepository extends BaseRepository<Employee> {
                 data.status || EmployeeStatus.ACTIVE,
             ]
         );
-        return this.mapRowToEmployee(result.rows[0]);
+        const insertId = ins.insertId;
+        if (!insertId) {
+            throw new Error('Failed to create employee');
+        }
+        const fetched = await this.selectByIdAfterInsert(Number(insertId));
+        return this.mapRowToEmployee(fetched.rows[0]);
     }
 
     async update(id: number, data: Partial<IEmployee>): Promise<Employee | null> {
         const updates: string[] = [];
         const values: any[] = [];
-        let paramCount = 1;
 
         if (data.name !== undefined) {
-            updates.push(`name = $${paramCount++}`);
+            updates.push(`name = ?`);
             values.push(data.name);
         }
         if (data.email !== undefined) {
-            updates.push(`email = $${paramCount++}`);
+            updates.push(`email = ?`);
             values.push(data.email);
         }
         if (data.phone !== undefined) {
-            updates.push(`phone = $${paramCount++}`);
+            updates.push(`phone = ?`);
             values.push(data.phone);
         }
         if (data.position !== undefined) {
-            updates.push(`position = $${paramCount++}`);
+            updates.push(`position = ?`);
             values.push(data.position);
         }
         if (data.department !== undefined) {
-            updates.push(`department = $${paramCount++}`);
+            updates.push(`department = ?`);
             values.push(data.department);
         }
         if (data.hire_date !== undefined) {
-            updates.push(`hire_date = $${paramCount++}`);
+            updates.push(`hire_date = ?`);
             values.push(data.hire_date);
         }
         if (data.status !== undefined) {
-            updates.push(`status = $${paramCount++}`);
+            updates.push(`status = ?`);
             values.push(data.status);
         }
 
@@ -121,16 +122,13 @@ export class EmployeeRepository extends BaseRepository<Employee> {
         }
 
         values.push(id);
-        const result = await this.query(
-            `UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-            values
-        );
-        return result.rows.length > 0 ? this.mapRowToEmployee(result.rows[0]) : null;
+        await this.query(`UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = ?`, values);
+        return this.findById(id);
     }
 
     async delete(id: number): Promise<boolean> {
-        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = $1 RETURNING id`, [id]);
-        return result.rows.length > 0;
+        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = ?`, [id]);
+        return (result.rowCount ?? 0) > 0;
     }
 
     private mapRowToEmployee(row: any): Employee {
@@ -149,4 +147,3 @@ export class EmployeeRepository extends BaseRepository<Employee> {
         });
     }
 }
-

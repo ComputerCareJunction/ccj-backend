@@ -34,11 +34,11 @@ router.use(authMiddleware.requireAdmin);
  *             schema:
  *               type: object
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden - admin role required
+ *         $ref: '#/components/responses/Forbidden'
  *       404:
- *         description: User not found
+ *         $ref: '#/components/responses/NotFound'
  *   post:
  *     summary: Set permission for user
  *     description: Set a specific permission for a user
@@ -74,11 +74,11 @@ router.use(authMiddleware.requireAdmin);
  *       200:
  *         description: Permission set successfully
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  *   delete:
  *     summary: Delete all permissions for user
  *     description: Remove all permissions from a user
@@ -96,11 +96,11 @@ router.use(authMiddleware.requireAdmin);
  *       200:
  *         description: Permissions deleted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  *       404:
- *         description: User not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/:userId', permissionController.getUserPermissions);
 
@@ -124,11 +124,11 @@ router.get('/:userId', permissionController.getUserPermissions);
  *       200:
  *         description: All permissions granted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  *       404:
- *         description: User not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.post('/:userId', permissionController.setPermission);
 

@@ -30,9 +30,9 @@ router.use(authMiddleware.authenticate);
  *               items:
  *                 $ref: '#/components/schemas/User'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden - insufficient permissions
+ *         $ref: '#/components/responses/Forbidden'
  */
 router.get(
     '/',
@@ -60,9 +60,9 @@ router.get(
  *               items:
  *                 $ref: '#/components/schemas/User'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden - admin role required
+ *         $ref: '#/components/responses/Forbidden'
  */
 router.get('/sub-users', authMiddleware.requireAdmin, userController.getSubUsers);
 
@@ -91,11 +91,11 @@ router.get('/sub-users', authMiddleware.requireAdmin, userController.getSubUsers
  *             schema:
  *               $ref: '#/components/schemas/User'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  *       404:
- *         description: User not found
+ *         $ref: '#/components/responses/NotFound'
  *   post:
  *     summary: Create a new user
  *     description: Create a new user in the system
@@ -134,11 +134,11 @@ router.get('/sub-users', authMiddleware.requireAdmin, userController.getSubUsers
  *             schema:
  *               $ref: '#/components/schemas/User'
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  *   put:
  *     summary: Update user
  *     description: Update user information
@@ -175,9 +175,9 @@ router.get('/sub-users', authMiddleware.requireAdmin, userController.getSubUsers
  *             schema:
  *               $ref: '#/components/schemas/User'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: User not found
+ *         $ref: '#/components/responses/NotFound'
  *   delete:
  *     summary: Delete user
  *     description: Delete a user from the system
@@ -195,9 +195,9 @@ router.get('/sub-users', authMiddleware.requireAdmin, userController.getSubUsers
  *       200:
  *         description: User deleted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: User not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get(
     '/:id',
@@ -256,9 +256,9 @@ router.delete(
  *       200:
  *         description: Password changed successfully
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.put(
     '/:id/change-password',
@@ -286,9 +286,9 @@ router.put(
  *       200:
  *         description: User activated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: User not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.put(
     '/:id/activate',
@@ -316,9 +316,9 @@ router.put(
  *       200:
  *         description: User deactivated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: User not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.put(
     '/:id/deactivate',

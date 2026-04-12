@@ -30,7 +30,7 @@ router.use(authMiddleware.authenticate);
  *               items:
  *                 $ref: '#/components/schemas/Product'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *   post:
  *     summary: Create a new product
  *     description: Add a new product to the system
@@ -79,9 +79,9 @@ router.use(authMiddleware.authenticate);
  *             schema:
  *               $ref: '#/components/schemas/Product'
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/', productController.getAllProducts);
 
@@ -109,9 +109,9 @@ router.get('/', productController.getAllProducts);
  *             schema:
  *               $ref: '#/components/schemas/Product'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Product not found
+ *         $ref: '#/components/responses/NotFound'
  *   put:
  *     summary: Update product
  *     description: Update product information
@@ -152,9 +152,9 @@ router.get('/', productController.getAllProducts);
  *             schema:
  *               $ref: '#/components/schemas/Product'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Product not found
+ *         $ref: '#/components/responses/NotFound'
  *   delete:
  *     summary: Delete product
  *     description: Delete a product from the system
@@ -172,9 +172,9 @@ router.get('/', productController.getAllProducts);
  *       200:
  *         description: Product deleted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Product not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/:id', productController.getProductById);
 
@@ -202,9 +202,9 @@ router.get('/:id', productController.getProductById);
  *             schema:
  *               $ref: '#/components/schemas/Product'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Product not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/slug/:slug', productController.getProductBySlug);
 
@@ -234,7 +234,7 @@ router.get('/slug/:slug', productController.getProductBySlug);
  *               items:
  *                 $ref: '#/components/schemas/Product'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/brand/:brand', productController.getProductsByBrand);
 
@@ -269,7 +269,7 @@ router.get('/brand/:brand', productController.getProductsByBrand);
  *               items:
  *                 $ref: '#/components/schemas/Product'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/brand/:brand/category/:category', productController.getProductsByBrandAndCategory);
 
@@ -299,7 +299,7 @@ router.get('/brand/:brand/category/:category', productController.getProductsByBr
  *               items:
  *                 $ref: '#/components/schemas/Product'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/category/:category', productController.getProductsByCategory);
 
@@ -323,7 +323,7 @@ router.get('/category/:category', productController.getProductsByCategory);
  *               items:
  *                 type: string
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/brands/list', productController.getUniqueBrands);
 
@@ -353,7 +353,7 @@ router.get('/brands/list', productController.getUniqueBrands);
  *               items:
  *                 type: string
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/brand/:brand/categories/list', productController.getCategoriesByBrand);
 
@@ -371,7 +371,7 @@ router.get('/brand/:brand/categories/list', productController.getCategoriesByBra
  *       200:
  *         description: Shop dropdown data retrieved successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/shop/dropdown', productController.getShopDropdownData);
 
