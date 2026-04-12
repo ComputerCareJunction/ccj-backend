@@ -40,7 +40,7 @@ const ticketController = new TicketController();
  *             schema:
  *               $ref: '#/components/schemas/Ticket'
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *   get:
  *     summary: Get all tickets
  *     description: Retrieve all support tickets (requires authentication)
@@ -58,7 +58,7 @@ const ticketController = new TicketController();
  *               items:
  *                 $ref: '#/components/schemas/Ticket'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.post('/', ticketController.createTicket);
 
@@ -89,9 +89,9 @@ router.use(authMiddleware.authenticate);
  *             schema:
  *               $ref: '#/components/schemas/Ticket'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Ticket not found
+ *         $ref: '#/components/responses/NotFound'
  *   put:
  *     summary: Update ticket
  *     description: Update ticket information
@@ -123,9 +123,9 @@ router.use(authMiddleware.authenticate);
  *       200:
  *         description: Ticket updated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Ticket not found
+ *         $ref: '#/components/responses/NotFound'
  *   delete:
  *     summary: Delete ticket
  *     description: Delete a support ticket
@@ -143,9 +143,9 @@ router.use(authMiddleware.authenticate);
  *       200:
  *         description: Ticket deleted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Ticket not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/', ticketController.getAllTickets);
 router.get('/:id', ticketController.getTicketById);
@@ -182,9 +182,9 @@ router.get('/:id', ticketController.getTicketById);
  *       200:
  *         description: Ticket status updated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Ticket not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.put('/:id', ticketController.updateTicket);
 router.put('/:id/status', ticketController.updateTicketStatus);

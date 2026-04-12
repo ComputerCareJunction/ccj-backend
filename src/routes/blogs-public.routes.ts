@@ -46,7 +46,7 @@ router.get('/', blogController.getAllBlogs);
  *             schema:
  *               $ref: '#/components/schemas/Blog'
  *       404:
- *         description: Blog not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/:id', blogController.getBlogById);
 

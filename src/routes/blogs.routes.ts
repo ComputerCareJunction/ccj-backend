@@ -30,7 +30,7 @@ router.use(authMiddleware.authenticate);
  *               items:
  *                 $ref: '#/components/schemas/Blog'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *   post:
  *     summary: Create a new blog post
  *     description: Create a new blog post
@@ -64,9 +64,9 @@ router.use(authMiddleware.authenticate);
  *             schema:
  *               $ref: '#/components/schemas/Blog'
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/', blogController.getAllBlogs);
 
@@ -94,9 +94,9 @@ router.get('/', blogController.getAllBlogs);
  *             schema:
  *               $ref: '#/components/schemas/Blog'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Blog not found
+ *         $ref: '#/components/responses/NotFound'
  *   put:
  *     summary: Update blog post
  *     description: Update an existing blog post
@@ -133,9 +133,9 @@ router.get('/', blogController.getAllBlogs);
  *             schema:
  *               $ref: '#/components/schemas/Blog'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Blog not found
+ *         $ref: '#/components/responses/NotFound'
  *   delete:
  *     summary: Delete blog post
  *     description: Delete a blog post
@@ -153,9 +153,9 @@ router.get('/', blogController.getAllBlogs);
  *       200:
  *         description: Blog deleted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Blog not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.post('/', blogController.createBlog);
 

@@ -1,6 +1,5 @@
 import { BaseRepository } from './BaseRepository';
 import { User, IUser, UserRole, UserStatus } from '../models/User';
-import { QueryResult } from 'pg';
 
 export class UserRepository extends BaseRepository<User> {
     constructor() {
@@ -9,40 +8,39 @@ export class UserRepository extends BaseRepository<User> {
 
     async findAll(): Promise<User[]> {
         const result = await this.query(`SELECT * FROM ${this.tableName} ORDER BY created_at DESC`);
-        return result.rows.map(row => this.mapRowToUser(row));
+        return result.rows.map((row) => this.mapRowToUser(row));
     }
 
     async findAllActive(): Promise<User[]> {
         const result = await this.query(
-            `SELECT * FROM ${this.tableName} WHERE status = $1 ORDER BY created_at DESC`,
+            `SELECT * FROM ${this.tableName} WHERE status = ? ORDER BY created_at DESC`,
             [UserStatus.ACTIVE]
         );
-        return result.rows.map(row => this.mapRowToUser(row));
+        return result.rows.map((row) => this.mapRowToUser(row));
     }
 
     async findAllInactive(): Promise<User[]> {
         const result = await this.query(
-            `SELECT * FROM ${this.tableName} WHERE status = $1 ORDER BY created_at DESC`,
+            `SELECT * FROM ${this.tableName} WHERE status = ? ORDER BY created_at DESC`,
             [UserStatus.INACTIVE]
         );
-        return result.rows.map(row => this.mapRowToUser(row));
+        return result.rows.map((row) => this.mapRowToUser(row));
     }
 
     async findById(id: number): Promise<User | null> {
-        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = $1`, [id]);
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = ?`, [id]);
         return result.rows.length > 0 ? this.mapRowToUser(result.rows[0]) : null;
     }
 
     async findByEmail(email: string): Promise<User | null> {
-        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE email = $1`, [email]);
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE email = ?`, [email]);
         return result.rows.length > 0 ? this.mapRowToUser(result.rows[0]) : null;
     }
 
     async create(data: Partial<IUser>): Promise<User> {
-        const result = await this.query(
+        const ins = await this.query(
             `INSERT INTO ${this.tableName} (name, email, password, phone, role, status)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING *`,
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [
                 data.name,
                 data.email,
@@ -52,36 +50,40 @@ export class UserRepository extends BaseRepository<User> {
                 data.status || UserStatus.ACTIVE,
             ]
         );
-        return this.mapRowToUser(result.rows[0]);
+        const insertId = ins.insertId;
+        if (!insertId) {
+            throw new Error('Failed to create user');
+        }
+        const fetched = await this.selectByIdAfterInsert(Number(insertId));
+        return this.mapRowToUser(fetched.rows[0]);
     }
 
     async update(id: number, data: Partial<IUser>): Promise<User | null> {
         const updates: string[] = [];
         const values: any[] = [];
-        let paramCount = 1;
 
         if (data.name !== undefined) {
-            updates.push(`name = $${paramCount++}`);
+            updates.push(`name = ?`);
             values.push(data.name);
         }
         if (data.email !== undefined) {
-            updates.push(`email = $${paramCount++}`);
+            updates.push(`email = ?`);
             values.push(data.email);
         }
         if (data.password !== undefined) {
-            updates.push(`password = $${paramCount++}`);
+            updates.push(`password = ?`);
             values.push(data.password);
         }
         if (data.phone !== undefined) {
-            updates.push(`phone = $${paramCount++}`);
+            updates.push(`phone = ?`);
             values.push(data.phone);
         }
         if (data.role !== undefined) {
-            updates.push(`role = $${paramCount++}`);
+            updates.push(`role = ?`);
             values.push(data.role);
         }
         if (data.status !== undefined) {
-            updates.push(`status = $${paramCount++}`);
+            updates.push(`status = ?`);
             values.push(data.status);
         }
 
@@ -90,36 +92,35 @@ export class UserRepository extends BaseRepository<User> {
         }
 
         values.push(id);
-        const result = await this.query(
-            `UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+        await this.query(
+            `UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = ?`,
             values
         );
-        return result.rows.length > 0 ? this.mapRowToUser(result.rows[0]) : null;
+        return this.findById(id);
     }
 
     async delete(id: number): Promise<boolean> {
-        // Soft delete: set status to inactive instead of deleting
         const result = await this.query(
-            `UPDATE ${this.tableName} SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id`,
+            `UPDATE ${this.tableName} SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
             [UserStatus.INACTIVE, id]
         );
-        return result.rows.length > 0;
+        return (result.rowCount ?? 0) > 0;
     }
 
     async findSubUsers(): Promise<User[]> {
         const result = await this.query(
-            `SELECT * FROM ${this.tableName} WHERE role = $1 ORDER BY created_at DESC`,
+            `SELECT * FROM ${this.tableName} WHERE role = ? ORDER BY created_at DESC`,
             [UserRole.SUB_USER]
         );
-        return result.rows.map(row => this.mapRowToUser(row));
+        return result.rows.map((row) => this.mapRowToUser(row));
     }
 
     async updatePassword(id: number, hashedPassword: string): Promise<User | null> {
-        const result = await this.query(
-            `UPDATE ${this.tableName} SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+        await this.query(
+            `UPDATE ${this.tableName} SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
             [hashedPassword, id]
         );
-        return result.rows.length > 0 ? this.mapRowToUser(result.rows[0]) : null;
+        return this.findById(id);
     }
 
     private mapRowToUser(row: any): User {
@@ -136,4 +137,3 @@ export class UserRepository extends BaseRepository<User> {
         });
     }
 }
-

@@ -30,9 +30,9 @@ router.use(authMiddleware.authenticate);
  *               items:
  *                 type: object
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  *   post:
  *     summary: Create a new employee
  *     description: Add a new employee to the system
@@ -50,11 +50,11 @@ router.use(authMiddleware.authenticate);
  *       201:
  *         description: Employee created successfully
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  */
 router.get(
     '/',
@@ -87,9 +87,9 @@ router.get(
  *             schema:
  *               type: object
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Employee not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get(
     '/by-email',
@@ -117,9 +117,9 @@ router.get(
  *       200:
  *         description: Employee retrieved successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Employee not found
+ *         $ref: '#/components/responses/NotFound'
  *   put:
  *     summary: Update employee
  *     description: Update employee information
@@ -143,9 +143,9 @@ router.get(
  *       200:
  *         description: Employee updated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Employee not found
+ *         $ref: '#/components/responses/NotFound'
  *   delete:
  *     summary: Delete employee
  *     description: Delete an employee
@@ -163,9 +163,9 @@ router.get(
  *       200:
  *         description: Employee deleted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Employee not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get(
     '/:id',
@@ -205,9 +205,9 @@ router.delete(
  *       200:
  *         description: Users synced successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Forbidden
+ *         $ref: '#/components/responses/Forbidden'
  */
 router.post(
     '/sync-users',

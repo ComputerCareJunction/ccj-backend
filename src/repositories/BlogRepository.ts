@@ -1,6 +1,5 @@
 import { BaseRepository } from './BaseRepository';
 import { Blog, IBlog } from '../models/Blog';
-import { QueryResult } from 'pg';
 
 export class BlogRepository extends BaseRepository<Blog> {
     constructor() {
@@ -9,19 +8,18 @@ export class BlogRepository extends BaseRepository<Blog> {
 
     async findAll(): Promise<Blog[]> {
         const result = await this.query(`SELECT * FROM ${this.tableName} ORDER BY date DESC, created_at DESC`);
-        return result.rows.map(row => this.mapRowToBlog(row));
+        return result.rows.map((row) => this.mapRowToBlog(row));
     }
 
     async findById(id: number): Promise<Blog | null> {
-        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = $1`, [id]);
+        const result = await this.query(`SELECT * FROM ${this.tableName} WHERE id = ?`, [id]);
         return result.rows.length > 0 ? this.mapRowToBlog(result.rows[0]) : null;
     }
 
     async create(data: Partial<IBlog>): Promise<Blog> {
-        const result = await this.query(
+        const ins = await this.query(
             `INSERT INTO ${this.tableName} (title, content, description, author, date, image)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING *`,
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [
                 data.title!,
                 data.content!,
@@ -31,36 +29,40 @@ export class BlogRepository extends BaseRepository<Blog> {
                 data.image || null,
             ]
         );
-        return this.mapRowToBlog(result.rows[0]);
+        const insertId = ins.insertId;
+        if (!insertId) {
+            throw new Error('Failed to create blog');
+        }
+        const fetched = await this.selectByIdAfterInsert(Number(insertId));
+        return this.mapRowToBlog(fetched.rows[0]);
     }
 
     async update(id: number, data: Partial<IBlog>): Promise<Blog | null> {
         const updates: string[] = [];
         const values: any[] = [];
-        let paramCount = 1;
 
         if (data.title !== undefined) {
-            updates.push(`title = $${paramCount++}`);
+            updates.push(`title = ?`);
             values.push(data.title);
         }
         if (data.content !== undefined) {
-            updates.push(`content = $${paramCount++}`);
+            updates.push(`content = ?`);
             values.push(data.content);
         }
         if (data.description !== undefined) {
-            updates.push(`description = $${paramCount++}`);
+            updates.push(`description = ?`);
             values.push(data.description);
         }
         if (data.author !== undefined) {
-            updates.push(`author = $${paramCount++}`);
+            updates.push(`author = ?`);
             values.push(data.author);
         }
         if (data.date !== undefined) {
-            updates.push(`date = $${paramCount++}`);
+            updates.push(`date = ?`);
             values.push(data.date);
         }
         if (data.image !== undefined) {
-            updates.push(`image = $${paramCount++}`);
+            updates.push(`image = ?`);
             values.push(data.image);
         }
 
@@ -69,16 +71,13 @@ export class BlogRepository extends BaseRepository<Blog> {
         }
 
         values.push(id);
-        const result = await this.query(
-            `UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-            values
-        );
-        return result.rows.length > 0 ? this.mapRowToBlog(result.rows[0]) : null;
+        await this.query(`UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = ?`, values);
+        return this.findById(id);
     }
 
     async delete(id: number): Promise<boolean> {
-        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = $1 RETURNING id`, [id]);
-        return result.rows.length > 0;
+        const result = await this.query(`DELETE FROM ${this.tableName} WHERE id = ?`, [id]);
+        return (result.rowCount ?? 0) > 0;
     }
 
     private mapRowToBlog(row: any): Blog {
@@ -86,7 +85,7 @@ export class BlogRepository extends BaseRepository<Blog> {
             id: row.id,
             title: row.title,
             content: row.content,
-            description: row.description || row.excerpt, // Support both for migration compatibility
+            description: row.description || row.excerpt,
             author: row.author,
             date: new Date(row.date),
             image: row.image,
@@ -95,4 +94,3 @@ export class BlogRepository extends BaseRepository<Blog> {
         });
     }
 }
-

@@ -57,9 +57,9 @@ class Server {
             allowedHeaders: ['Content-Type', 'Authorization'],
         }));
 
-        // Body parsing middleware
-        this.app.use(express.json());
-        this.app.use(express.urlencoded({ extended: true }));
+        // Body parsing middleware (default 100kb is too small for base64 images on products/blogs)
+        this.app.use(express.json({ limit: '10mb' }));
+        this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
         // Request logging
         this.app.use((req: Request, res: Response, next: NextFunction) => {
@@ -79,8 +79,12 @@ class Server {
         this.app.get('/api-docs', swaggerUi.setup(swaggerSpec, {
             swaggerOptions: {
                 persistAuthorization: true,
+                defaultModelsExpandDepth: -1,
             },
-            customCss: '.swagger-ui .topbar { display: none }',
+            customCss: [
+                '.swagger-ui .topbar { display: none }',
+                '.swagger-ui section.models { display: none !important; }',
+            ].join('\n'),
         }));
 
         // API routes
@@ -95,8 +99,16 @@ class Server {
     private initializeErrorHandling(): void {
         this.app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
             console.error('Error:', err);
-            res.status(500).json({
-                error: 'Internal server error',
+            const e = err as unknown as { status?: number; statusCode?: number };
+            const status =
+                typeof e.status === 'number'
+                    ? e.status
+                    : typeof e.statusCode === 'number'
+                      ? e.statusCode
+                      : 500;
+            const httpStatus = status >= 400 && status < 600 ? status : 500;
+            res.status(httpStatus).json({
+                error: httpStatus === 500 ? 'Internal server error' : err.message || 'Request error',
                 message: EnvironmentConfig.NODE_ENV === 'development' ? err.message : undefined,
             });
         });
@@ -106,25 +118,27 @@ class Server {
         try {
             // Test database connection (non-blocking - will retry)
             db.testConnection().then((connected) => {
-                if (connected) {
-                    console.log('✅ Database connection established');
-                } else {
+                if (!connected) {
                     console.warn('⚠️  Database connection failed. Server will start but database features will not work.');
-                    console.warn('   Please ensure PostgreSQL is running and .env is configured correctly.');
+                    console.warn('   Please ensure MySQL is running and .env is configured correctly.');
                 }
             }).catch((error) => {
                 console.warn('⚠️  Database connection error:', error.message);
-                console.warn('   Please ensure PostgreSQL is running and .env is configured correctly.');
+                console.warn('   Please ensure MySQL is running and .env is configured correctly.');
             });
 
             // Start server even if database connection fails
+            const apiBase = EnvironmentConfig.API_URL.replace(/\/api\/?$/, '');
+            const swaggerUrl = `${apiBase}/api-docs`;
+            const dbName = db.getDatabaseName();
+
             this.app.listen(this.port, () => {
                 console.log(`🚀 Server is running on port ${this.port}`);
                 console.log(`📦 Environment: ${EnvironmentConfig.NODE_ENV}`);
                 console.log(`🌐 Frontend URL: ${EnvironmentConfig.FRONTEND_URL}`);
-                console.log(`📚 API Documentation: http://localhost:${this.port}/api-docs`);
-                console.log(`\n📝 Note: Ensure PostgreSQL is running and database is set up.`);
-                console.log(`   Run migrations: psql -U postgres -d ccj_db -f migrations/001_initial_schema.sql`);
+                console.log(`📚 Swagger UI: ${swaggerUrl}`);
+                console.log(`\n📝 Database: ${dbName} (MySQL). Run migrations against this database, e.g.:`);
+                console.log(`   mysql -u <user> -p ${dbName} < migrations/001_initial_schema.sql`);
                 console.log(`   Seed admin: npm run seed\n`);
             });
         } catch (error) {

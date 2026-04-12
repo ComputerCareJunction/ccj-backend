@@ -10,6 +10,7 @@ dotenv.config({ path: envPath });
 
 class DatabaseConfig {
   private pool: Pool;
+  private readonly databaseName: string;
 
   constructor() {
     // Parse MySQL connection string or use individual config parameters
@@ -47,16 +48,30 @@ class DatabaseConfig {
       };
     }
 
+    this.databaseName =
+      (config.database && String(config.database)) ||
+      process.env.DB_NAME ||
+      'ccj_db';
+
     this.pool = mysql.createPool(config);
 
-    this.pool.on('error', (err) => {
-      console.error('Unexpected error on idle connection', err);
-      process.exit(1);
-    });
+    // mysql2 Pool extends EventEmitter; typings omit 'error' on promise pool
+    (this.pool as unknown as { on(event: 'error', fn: (err: Error) => void): void }).on(
+      'error',
+      (err: Error) => {
+        console.error('Unexpected error on idle connection', err);
+        process.exit(1);
+      }
+    );
   }
 
   public getPool(): Pool {
     return this.pool;
+  }
+
+  /** Resolved database name from DATABASE_URL or DB_NAME (for logs / dev hints). */
+  public getDatabaseName(): string {
+    return this.databaseName;
   }
 
   public async testConnection(): Promise<boolean> {

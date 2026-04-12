@@ -41,7 +41,7 @@ const orderController = new OrderController();
  *             schema:
  *               $ref: '#/components/schemas/Order'
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *   get:
  *     summary: Get all orders
  *     description: Retrieve all orders (requires authentication)
@@ -59,7 +59,7 @@ const orderController = new OrderController();
  *               items:
  *                 $ref: '#/components/schemas/Order'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.post('/', orderController.createOrder);
 
@@ -90,9 +90,9 @@ router.use(authMiddleware.authenticate);
  *             schema:
  *               $ref: '#/components/schemas/Order'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Order not found
+ *         $ref: '#/components/responses/NotFound'
  *   put:
  *     summary: Update order
  *     description: Update order information
@@ -116,9 +116,9 @@ router.use(authMiddleware.authenticate);
  *       200:
  *         description: Order updated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Order not found
+ *         $ref: '#/components/responses/NotFound'
  *   delete:
  *     summary: Delete order
  *     description: Delete an order
@@ -136,9 +136,9 @@ router.use(authMiddleware.authenticate);
  *       200:
  *         description: Order deleted successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Order not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/', orderController.getAllOrders);
 router.get('/:id', orderController.getOrderById);
@@ -167,9 +167,9 @@ router.get('/:id', orderController.getOrderById);
  *             schema:
  *               $ref: '#/components/schemas/Order'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Order not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/number/:orderNumber', orderController.getOrderByOrderNumber);
 
@@ -205,9 +205,9 @@ router.get('/number/:orderNumber', orderController.getOrderByOrderNumber);
  *       200:
  *         description: Order status updated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Order not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.put('/:id/status', orderController.updateOrderStatus);
 

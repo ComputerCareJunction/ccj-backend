@@ -22,6 +22,14 @@ export interface AuthTokenPayload {
     role: UserRole;
 }
 
+export const PASSWORD_RESET_JWT_PURPOSE = 'password_reset';
+
+export interface PasswordResetTokenPayload {
+    purpose: typeof PASSWORD_RESET_JWT_PURPOSE;
+    userId: number;
+    email: string;
+}
+
 export class AuthService {
     private userRepository: UserRepository;
 
@@ -87,6 +95,32 @@ export class AuthService {
             return jwt.verify(token, EnvironmentConfig.JWT_SECRET) as AuthTokenPayload;
         } catch (error) {
             throw new Error('Invalid or expired token');
+        }
+    }
+
+    generatePasswordResetToken(userId: number, email: string): string {
+        const payload: PasswordResetTokenPayload = {
+            purpose: PASSWORD_RESET_JWT_PURPOSE,
+            userId,
+            email,
+        };
+        return jwt.sign(payload, EnvironmentConfig.JWT_SECRET, { expiresIn: '15m' } as jwt.SignOptions);
+    }
+
+    verifyPasswordResetToken(token: string): { userId: number; email: string } {
+        try {
+            const decoded = jwt.verify(token, EnvironmentConfig.JWT_SECRET) as jwt.JwtPayload &
+                Partial<PasswordResetTokenPayload>;
+            if (
+                decoded.purpose !== PASSWORD_RESET_JWT_PURPOSE ||
+                typeof decoded.userId !== 'number' ||
+                typeof decoded.email !== 'string'
+            ) {
+                throw new Error('Invalid or expired reset token');
+            }
+            return { userId: decoded.userId, email: decoded.email };
+        } catch {
+            throw new Error('Invalid or expired reset token');
         }
     }
 }

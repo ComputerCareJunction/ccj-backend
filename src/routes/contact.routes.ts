@@ -49,7 +49,7 @@ const contactController = new ContactController();
  *                 message:
  *                   type: string
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *   get:
  *     summary: Get all contact submissions
  *     description: Retrieve all contact submissions (requires authentication)
@@ -67,7 +67,7 @@ const contactController = new ContactController();
  *               items:
  *                 type: object
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.post('/', contactController.createContact);
 
@@ -94,9 +94,9 @@ router.use(authMiddleware.authenticate);
  *       200:
  *         description: Contact retrieved successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Contact not found
+ *         $ref: '#/components/responses/NotFound'
  *   patch:
  *     summary: Update contact screening status
  *     description: Update the screening status of a contact
@@ -126,9 +126,9 @@ router.use(authMiddleware.authenticate);
  *       200:
  *         description: Contact status updated successfully
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
- *         description: Contact not found
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/', contactController.getAllContacts);
 router.get('/:id', contactController.getContactById);
