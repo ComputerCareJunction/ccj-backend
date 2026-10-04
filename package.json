@@ -9,7 +9,9 @@
     "d1:migrate": "wrangler d1 execute ccj-api --remote --file=schema.sql",
     "d1:migrate:dashboard": "wrangler d1 execute ccj-api --remote --file=migrations/0002_dashboard_api.sql",
     "d1:migrate:firebase-employees": "wrangler d1 execute ccj-api --remote --file=migrations/0003_firebase_employee_link.sql",
-    "d1:migrate:careers": "wrangler d1 execute ccj-api --remote --file=migrations/0004_careers.sql"
+    "d1:migrate:careers": "wrangler d1 execute ccj-api --remote --file=migrations/0004_careers.sql",
+    "d1:migrate:application-users": "wrangler d1 execute ccj-api --remote --file=migrations/0005_application_user_access.sql",
+    "d1:migrate:section-permissions": "wrangler d1 execute ccj-api --remote --file=migrations/0006_section_permissions.sql"
   },
   "keywords": [
     "api",
@@ -24,5 +26,8 @@
     "@types/node": "^26.6.3",
     "typescript": "^5.3.3",
     "wrangler": "^4.81.1"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.5.0"
   }
 }

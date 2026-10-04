@@ -1,0 +1,1 @@
+ALTER TABLE application_users ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '{}';

@@ -1,3 +1,5 @@
+import { withFirebaseAdminAuth } from './firebaseAdmin';
+
 export interface Env {
     DB: any;
     STORAGE: any;
@@ -293,6 +295,52 @@ type AuthenticatedUser = {
     email: string;
     name: string;
     photoURL?: string;
+    isAdmin: boolean;
+    emailVerified: boolean;
+};
+
+type DashboardSection = 'products' | 'orders' | 'tickets' | 'users' | 'employees' | 'leads' | 'resources';
+type SectionPermission = { read: boolean; write: boolean };
+type SectionPermissions = Record<DashboardSection, SectionPermission>;
+
+const DASHBOARD_SECTIONS: DashboardSection[] = ['products', 'orders', 'tickets', 'users', 'employees', 'leads', 'resources'];
+
+const emptySectionPermissions = (): SectionPermissions => Object.fromEntries(
+    DASHBOARD_SECTIONS.map((section) => [section, { read: false, write: false }])
+) as SectionPermissions;
+
+const adminSectionPermissions = (): SectionPermissions => Object.fromEntries(
+    DASHBOARD_SECTIONS.map((section) => [section, { read: true, write: true }])
+) as SectionPermissions;
+
+const parseSectionPermissions = (raw: unknown): SectionPermissions => {
+    let parsed: Record<string, unknown> = {};
+    try {
+        if (typeof raw === 'string') parsed = JSON.parse(raw) as Record<string, unknown>;
+        else if (raw && typeof raw === 'object') parsed = raw as Record<string, unknown>;
+    } catch {
+        parsed = {};
+    }
+
+    const permissions = emptySectionPermissions();
+    for (const section of DASHBOARD_SECTIONS) {
+        const entry = parsed[section] as Partial<SectionPermission> | undefined;
+        const write = entry?.write === true;
+        permissions[section] = { read: entry?.read === true || write, write };
+    }
+    return permissions;
+};
+
+const sectionForPath = (path: string): DashboardSection | null => {
+    if (path === '/dashboard/counts') return 'products';
+    if (path.startsWith('/products')) return 'products';
+    if (path.startsWith('/orders')) return 'orders';
+    if (path.startsWith('/tickets') || path.startsWith('/support-tickets')) return 'tickets';
+    if (path.startsWith('/firebase/users') || path.startsWith('/users')) return 'users';
+    if (path.startsWith('/employees') || path.startsWith('/attendance')) return 'employees';
+    if (path.startsWith('/contact')) return 'leads';
+    if (path.startsWith('/blogs') || path.startsWith('/careers')) return 'resources';
+    return null;
 };
 
 const base64UrlToBytes = (value: string): Uint8Array => {
@@ -371,7 +419,7 @@ const getFirebaseAdminAccessToken = async (env: Env): Promise<string> => {
     return tokenBody.access_token;
 };
 
-const authenticateAdmin = async (request: Request, env: Env): Promise<AuthenticatedUser | null> => {
+const authenticateFirebaseUser = async (request: Request, env: Env): Promise<AuthenticatedUser | null> => {
     const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '');
     if (!token) return null;
 
@@ -386,10 +434,7 @@ const authenticateAdmin = async (request: Request, env: Env): Promise<Authentica
         const now = Math.floor(Date.now() / 1000);
         if (payload.aud !== projectId || payload.iss !== `https://securetoken.google.com/${projectId}` ||
             typeof payload.sub !== 'string' || payload.exp <= now || payload.iat > now ||
-            payload.email_verified !== true || typeof payload.email !== 'string') return null;
-
-        const allowedEmails = env.ADMIN_EMAILS?.split(',').map((email) => email.trim().toLowerCase()).filter(Boolean) || [];
-        if (!payload.admin && (!allowedEmails.length || !allowedEmails.includes(payload.email.toLowerCase()))) return null;
+            typeof payload.email !== 'string') return null;
 
         const keyResponse = await fetch('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com');
         if (!keyResponse.ok) return null;
@@ -411,11 +456,71 @@ const authenticateAdmin = async (request: Request, env: Env): Promise<Authentica
             email: payload.email,
             name: payload.name || payload.email.split('@')[0],
             photoURL: payload.picture,
+            isAdmin: payload.admin === true,
+            emailVerified: payload.email_verified === true,
         };
     } catch {
         return null;
     }
 };
+
+const isConfiguredAdmin = (user: AuthenticatedUser, env: Env): boolean => {
+    const allowedEmails = env.ADMIN_EMAILS?.split(',').map((email) => email.trim().toLowerCase()).filter(Boolean) || [];
+    return user.isAdmin || allowedEmails.includes(user.email.toLowerCase());
+};
+
+const findApplicationUser = (user: AuthenticatedUser, env: Env): Promise<Record<string, any> | null> => env.DB.prepare(`
+    SELECT id, firebase_uid, name, email, phone, role, status, permissions_json
+    FROM application_users
+    WHERE firebase_uid = ? OR (firebase_uid IS NULL AND email = ? COLLATE NOCASE)
+    LIMIT 1
+`).bind(user.uid, user.email).first();
+
+const authenticateApplicationUser = async (request: Request, env: Env): Promise<{ user: AuthenticatedUser; applicationUser: Record<string, any> } | null> => {
+    const user = await authenticateFirebaseUser(request, env);
+    if (!user) return null;
+    const applicationUser = await findApplicationUser(user, env);
+    if (!applicationUser || applicationUser.status !== 'active') return null;
+
+    if (!applicationUser.firebase_uid) {
+        await env.DB.prepare(`
+            UPDATE application_users SET firebase_uid = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND firebase_uid IS NULL
+        `).bind(user.uid, applicationUser.id).run();
+        applicationUser.firebase_uid = user.uid;
+    }
+
+    return { user, applicationUser };
+};
+
+const authenticateAdmin = async (request: Request, env: Env): Promise<AuthenticatedUser | null> => {
+    const access = await authenticateApplicationUser(request, env);
+    return access?.applicationUser.role === 'admin' ? access.user : null;
+};
+
+const requireApplicationUser = async (request: Request, env: Env): Promise<{ user: AuthenticatedUser; applicationUser: Record<string, any> } | Response> => {
+    const access = await authenticateApplicationUser(request, env);
+    return access || HttpResponse.error('Authentication required', 401);
+};
+
+const requireSectionAccess = async (
+    request: Request,
+    env: Env,
+    section: DashboardSection,
+    mode: 'read' | 'write'
+): Promise<{ user: AuthenticatedUser; applicationUser: Record<string, any> } | Response> => {
+    const access = await requireApplicationUser(request, env);
+    if (access instanceof Response) return access;
+    if (access.applicationUser.role === 'admin') return access;
+
+    const permission = parseSectionPermissions(access.applicationUser.permissions_json)[section];
+    const granted = mode === 'read' ? permission.read : permission.write;
+    return granted
+        ? access
+        : HttpResponse.error(`You do not have ${mode} access to the ${section} section. Ask an administrator to update your permissions.`, 403);
+};
+
+const requireSectionRead = (request: Request, env: Env, section: DashboardSection) => requireSectionAccess(request, env, section, 'read');
 
 const requireAdmin = async (request: Request, env: Env): Promise<AuthenticatedUser | Response> => {
     const user = await authenticateAdmin(request, env);
@@ -477,8 +582,8 @@ export class ApiRouter {
 
         if ((path === '/blogs' || path === '/public/blogs') && method === 'GET') return new BlogController(env).getBlogs();
         if ((path === '/blogs' || path === '/public/blogs') && method === 'POST') {
-            const auth = await requireAdmin(request, env);
-            return auth instanceof Response ? auth : new BlogController(env).createBlog(request);
+            const access = await requireSectionAccess(request, env, 'resources', 'write');
+            return access instanceof Response ? access : new BlogController(env).createBlog(request);
         }
         if (path.startsWith('/blogs/') || path.startsWith('/public/blogs/')) {
             const publicPrefix = path.startsWith('/public/blogs/') ? '/public/blogs/' : '/blogs/';
@@ -487,24 +592,24 @@ export class ApiRouter {
                 const blog = await env.DB.prepare('SELECT * FROM blogs WHERE id = ?').bind(id).first();
                 return blog ? HttpResponse.json({ blog }) : notFound('Blog');
             }
-            const auth = await requireAdmin(request, env);
-            if (auth instanceof Response) return auth;
+            const access = await requireSectionAccess(request, env, 'resources', 'write');
+            if (access instanceof Response) return access;
             if (method === 'PUT') return new BlogController(env).updateBlog(id, request);
             if (method === 'DELETE') return new BlogController(env).deleteBlog(id);
         }
 
         if (path === '/public/careers' && method === 'GET') return new CareersController(env).getCareers(true);
         if (path === '/careers' && method === 'GET') {
-            const auth = await requireAdmin(request, env);
-            return auth instanceof Response ? auth : new CareersController(env).getCareers();
+            const access = await requireSectionRead(request, env, 'resources');
+            return access instanceof Response ? access : new CareersController(env).getCareers();
         }
         if (path === '/careers' && method === 'POST') {
-            const auth = await requireAdmin(request, env);
-            return auth instanceof Response ? auth : new CareersController(env).createCareer(request);
+            const access = await requireSectionAccess(request, env, 'resources', 'write');
+            return access instanceof Response ? access : new CareersController(env).createCareer(request);
         }
         if (path.startsWith('/careers/')) {
-            const auth = await requireAdmin(request, env);
-            if (auth instanceof Response) return auth;
+            const access = await requireSectionAccess(request, env, 'resources', 'write');
+            if (access instanceof Response) return access;
             const careers = new CareersController(env);
             const id = routeId(path, '/careers/');
             if (method === 'PUT') return careers.updateCareer(id, request);
@@ -512,8 +617,13 @@ export class ApiRouter {
         }
 
         if (path === '/storage/upload' && method === 'POST') {
-            const auth = await requireAdmin(request, env);
-            return auth instanceof Response ? auth : this.uploadFile(request, env);
+            const section = url.searchParams.get('section');
+            if (section === 'products' || section === 'resources') {
+                const access = await requireSectionAccess(request, env, section, 'write');
+                return access instanceof Response ? access : this.uploadFile(request, env);
+            }
+            const admin = await requireAdmin(request, env);
+            return admin instanceof Response ? admin : this.uploadFile(request, env);
         }
         if (path.startsWith('/storage/') && method === 'GET') return new StorageController(env).getFile(routeId(path, '/storage/'));
 
@@ -521,6 +631,19 @@ export class ApiRouter {
         if (path === '/users' && method === 'POST') return this.createUser(request, env);
         if (path.startsWith('/users/')) return this.userByPath(request, env, path.slice('/users/'.length));
         if (path === '/firebase/users' && method === 'GET') return this.listFirebaseUsers(request, env, url);
+        if (path === '/firebase/users' && method === 'POST') return this.provisionFirebaseUser(request, env);
+        if (path.startsWith('/firebase/users/') && path.endsWith('/access') && method === 'PUT') {
+            const uid = routeId(path, '/firebase/users/').replace(/\/access$/, '');
+            return this.setFirebaseUserAccess(request, env, uid);
+        }
+        if (path.startsWith('/firebase/users/') && path.endsWith('/role') && method === 'PUT') {
+            const uid = routeId(path, '/firebase/users/').replace(/\/role$/, '');
+            return this.setFirebaseUserRole(request, env, uid);
+        }
+        if (path.startsWith('/firebase/users/') && path.endsWith('/permissions') && method === 'PUT') {
+            const uid = routeId(path, '/firebase/users/').replace(/\/permissions$/, '');
+            return this.setFirebaseUserPermissions(request, env, uid);
+        }
         if (path.startsWith('/firebase/users/') && path.endsWith('/employee') && method === 'PUT') {
             const uid = routeId(path, '/firebase/users/').replace(/\/employee$/, '');
             return this.setFirebaseUserEmployee(request, env, uid);
@@ -533,18 +656,67 @@ export class ApiRouter {
         if (path === '/attendance' && method === 'POST') return this.createAttendance(request, env);
         if (path.startsWith('/attendance/')) return this.deleteAttendance(request, env, routeId(path, '/attendance/'));
         if (path === '/auth/profile' && method === 'GET') return this.getProfile(request, env);
+        if (path === '/auth/access' && method === 'GET') return this.getApplicationAccess(request, env);
 
         return HttpResponse.error('API Endpoint not found', 404);
     }
 
     private static async authorized(request: Request, env: Env): Promise<Response | null> {
-        const auth = await requireAdmin(request, env);
-        return auth instanceof Response ? auth : null;
+        const section = sectionForPath(new URL(request.url).pathname.replace(/^\/api/, ''));
+        if (!section) {
+            const admin = await requireAdmin(request, env);
+            return admin instanceof Response ? admin : null;
+        }
+        const access = await requireSectionAccess(request, env, section, request.method === 'GET' ? 'read' : 'write');
+        return access instanceof Response ? access : null;
+    }
+
+    private static async getApplicationAccess(request: Request, env: Env): Promise<Response> {
+        const user = await authenticateFirebaseUser(request, env);
+        if (!user) return HttpResponse.error('Sign-in is required.', 401);
+
+        let applicationUser = await findApplicationUser(user, env);
+
+        if (!applicationUser && (isConfiguredAdmin(user, env) || user.isAdmin)) {
+            await env.DB.prepare(`
+                INSERT OR IGNORE INTO application_users (id, firebase_uid, name, email, role, status)
+                VALUES (?, ?, ?, ?, 'admin', 'active')
+            `).bind(crypto.randomUUID(), user.uid, user.name, user.email).run();
+            applicationUser = await findApplicationUser(user, env);
+        }
+
+        if (!applicationUser || applicationUser.status !== 'active') {
+            return HttpResponse.error('This account is not authorized for application access. Ask an administrator to create or enable your user record.', 403);
+        }
+
+        if (!applicationUser.firebase_uid) {
+            await env.DB.prepare(`
+                UPDATE application_users SET firebase_uid = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND firebase_uid IS NULL
+            `).bind(user.uid, applicationUser.id).run();
+        }
+
+        return HttpResponse.json({
+            id: user.uid,
+            name: applicationUser.name || user.name,
+            email: applicationUser.email,
+            phone: applicationUser.phone,
+            role: applicationUser.role === 'admin' ? 'admin' : 'user',
+            status: applicationUser.status,
+            permissions: applicationUser.role === 'admin'
+                ? adminSectionPermissions()
+                : parseSectionPermissions(applicationUser.permissions_json),
+        });
     }
 
     private static async getDashboardCounts(request: Request, env: Env): Promise<Response> {
-        const denied = await this.authorized(request, env);
-        if (denied) return denied;
+        const access = await requireApplicationUser(request, env);
+        if (access instanceof Response) return access;
+        const admin = access.applicationUser.role === 'admin';
+        const permissions = admin ? adminSectionPermissions() : parseSectionPermissions(access.applicationUser.permissions_json);
+        if (!admin && !DASHBOARD_SECTIONS.some((section) => permissions[section].read)) {
+            return HttpResponse.error('Dashboard overview requires read access to at least one section.', 403);
+        }
 
         const counts = await Promise.all([
             env.DB.prepare('SELECT COUNT(*) AS total FROM products').first(),
@@ -557,13 +729,14 @@ export class ApiRouter {
         ]);
 
         return HttpResponse.json({
-            products: Number(counts[0]?.total || 0),
-            orders: Number(counts[1]?.total || 0),
-            tickets: Number(counts[2]?.total || 0),
-            blogs: Number(counts[3]?.total || 0),
-            careers: Number(counts[4]?.total || 0),
-            employees: Number(counts[5]?.total || 0),
-            leads: Number(counts[6]?.total || 0),
+            products: permissions.products.read ? Number(counts[0]?.total || 0) : 0,
+            orders: permissions.orders.read ? Number(counts[1]?.total || 0) : 0,
+            tickets: permissions.tickets.read ? Number(counts[2]?.total || 0) : 0,
+            blogs: permissions.resources.read ? Number(counts[3]?.total || 0) : 0,
+            careers: permissions.resources.read ? Number(counts[4]?.total || 0) : 0,
+            employees: permissions.employees.read ? Number(counts[5]?.total || 0) : 0,
+            leads: permissions.leads.read ? Number(counts[6]?.total || 0) : 0,
+            users: permissions.users.read ? Number((await env.DB.prepare('SELECT COUNT(*) AS total FROM application_users').first() as { total?: number } | null)?.total || 0) : 0,
         });
     }
 
@@ -822,8 +995,8 @@ export class ApiRouter {
     }
 
     private static async listFirebaseUsers(request: Request, env: Env, url: URL): Promise<Response> {
-        const denied = await this.authorized(request, env);
-        if (denied) return denied;
+        const access = await requireSectionRead(request, env, 'users');
+        if (access instanceof Response) return access;
 
         try {
             const accessToken = await getFirebaseAdminAccessToken(env);
@@ -848,19 +1021,26 @@ export class ApiRouter {
             }
 
             const result = await response.json() as { users?: Array<Record<string, any>>; nextPageToken?: string };
-            const employees = await env.DB.prepare('SELECT firebase_uid, email, status FROM employees').all();
+            const [employees, applicationUsers] = await Promise.all([
+                env.DB.prepare('SELECT firebase_uid, email, status FROM employees').all(),
+                env.DB.prepare('SELECT firebase_uid, email, status, role, permissions_json FROM application_users').all(),
+            ]);
             const byUid = new Set((employees.results || []).filter((employee: any) => employee.status === 'active' && employee.firebase_uid).map((employee: any) => employee.firebase_uid));
             const byEmail = new Set((employees.results || []).filter((employee: any) => employee.status === 'active').map((employee: any) => String(employee.email).toLowerCase()));
+            const appUserByUid = new Map<string, Record<string, any>>((applicationUsers.results || []).filter((applicationUser: any) => applicationUser.firebase_uid).map((applicationUser: any) => [applicationUser.firebase_uid, applicationUser]));
+            const appUserByEmail = new Map<string, Record<string, any>>((applicationUsers.results || []).map((applicationUser: any) => [String(applicationUser.email).toLowerCase(), applicationUser]));
             const users = (result.users || []).map((user) => ({
                 id: user.localId,
                 name: user.displayName || user.email?.split('@')[0] || 'Firebase user',
                 email: user.email || '',
                 phone: user.phoneNumber || '',
                 photoURL: user.photoUrl || '',
-                role: user.customAttributes ? JSON.parse(user.customAttributes).role || 'user' : 'user',
+                role: appUserByUid.get(user.localId)?.role || appUserByEmail.get(String(user.email || '').toLowerCase())?.role || 'user',
                 status: user.disabled ? 'inactive' : 'active',
                 createdAt: user.createdAt ? new Date(Number(user.createdAt)).toISOString() : '',
                 isEmployee: byUid.has(user.localId) || byEmail.has(String(user.email || '').toLowerCase()),
+                applicationAccess: appUserByUid.get(user.localId)?.status || appUserByEmail.get(String(user.email || '').toLowerCase())?.status || 'not_registered',
+                permissions: parseSectionPermissions(appUserByUid.get(user.localId)?.permissions_json || appUserByEmail.get(String(user.email || '').toLowerCase())?.permissions_json),
             }));
             return HttpResponse.json({ users, nextPageToken: result.nextPageToken || null });
         } catch (error) {
@@ -891,9 +1071,185 @@ export class ApiRouter {
         }
     }
 
+    private static async setFirebaseUserAccess(request: Request, env: Env, uid: string): Promise<Response> {
+        const admin = await requireAdmin(request, env);
+        if (admin instanceof Response) return admin;
+
+        const { status } = await jsonBody(request);
+        if (!['active', 'inactive'].includes(status)) return HttpResponse.error('Access status must be active or inactive.', 400);
+        if (!env.FIREBASE_CLIENT_EMAIL || !env.FIREBASE_PRIVATE_KEY) {
+            return HttpResponse.error('Firebase Admin credentials are not configured on the backend.', 503);
+        }
+
+        let firebaseUser;
+        try {
+            firebaseUser = await withFirebaseAdminAuth({
+                projectId: env.FIREBASE_PROJECT_ID || 'ccj-web',
+                clientEmail: env.FIREBASE_CLIENT_EMAIL,
+                privateKey: env.FIREBASE_PRIVATE_KEY,
+            }, (firebaseAuth) => firebaseAuth.getUser(uid));
+        } catch (error) {
+            const code = (error as { code?: string }).code;
+            if (code === 'auth/user-not-found') return notFound('Firebase user');
+            console.error(JSON.stringify({ message: 'Firebase account lookup for access management failed', code: code || 'unknown' }));
+            return HttpResponse.error('Unable to verify the Firebase account. Retry after checking backend credentials.', 502);
+        }
+
+        const firebaseEmail = firebaseUser.email?.trim().toLowerCase();
+        if (!firebaseEmail) return HttpResponse.error('This Firebase account has no email address and cannot be granted email-based application access.', 400);
+
+        const linkedRows = await env.DB.prepare(`
+            SELECT id, firebase_uid, email FROM application_users
+            WHERE email = ? COLLATE NOCASE OR firebase_uid = ?
+        `).bind(firebaseEmail, firebaseUser.uid).all();
+        const emailRow = (linkedRows.results || []).find((row: any) => String(row.email).toLowerCase() === firebaseEmail);
+        const uidRow = (linkedRows.results || []).find((row: any) => row.firebase_uid === firebaseUser.uid);
+
+        if (emailRow && uidRow && emailRow.id !== uidRow.id) {
+            return HttpResponse.error('The Firebase account and application email are attached to separate database records. Reconcile those records before changing access.', 409);
+        }
+
+        const row = emailRow || uidRow;
+        if (row) {
+            await env.DB.prepare(`
+                UPDATE application_users
+                SET firebase_uid = ?, email = ?, name = ?, phone = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).bind(firebaseUser.uid, firebaseEmail, firebaseUser.displayName || firebaseEmail.split('@')[0], firebaseUser.phoneNumber || '', status, row.id).run();
+        } else if (status === 'active') {
+            await env.DB.prepare(`
+                INSERT INTO application_users (id, firebase_uid, name, email, phone, role, status)
+                VALUES (?, ?, ?, ?, ?, 'user', 'active')
+            `).bind(crypto.randomUUID(), firebaseUser.uid, firebaseUser.displayName || firebaseEmail.split('@')[0], firebaseEmail, firebaseUser.phoneNumber || '').run();
+        } else {
+            return notFound('Application user');
+        }
+
+        return HttpResponse.json({ success: true, applicationAccess: status });
+    }
+
+    private static async setFirebaseUserRole(request: Request, env: Env, uid: string): Promise<Response> {
+        const admin = await requireAdmin(request, env);
+        if (admin instanceof Response) return admin;
+
+        const { role } = await jsonBody(request);
+        if (!['admin', 'user'].includes(role)) return HttpResponse.error('Role must be admin or user.', 400);
+        if (!env.FIREBASE_CLIENT_EMAIL || !env.FIREBASE_PRIVATE_KEY) {
+            return HttpResponse.error('Firebase Admin credentials are not configured on the backend.', 503);
+        }
+
+        let firebaseUser;
+        try {
+            firebaseUser = await withFirebaseAdminAuth({
+                projectId: env.FIREBASE_PROJECT_ID || 'ccj-web',
+                clientEmail: env.FIREBASE_CLIENT_EMAIL,
+                privateKey: env.FIREBASE_PRIVATE_KEY,
+            }, (firebaseAuth) => firebaseAuth.getUser(uid));
+        } catch (error) {
+            const code = (error as { code?: string }).code;
+            if (code === 'auth/user-not-found') return notFound('Firebase user');
+            console.error(JSON.stringify({ message: 'Firebase account lookup for role management failed', code: code || 'unknown' }));
+            return HttpResponse.error('Unable to verify the Firebase account. Retry after checking backend credentials.', 502);
+        }
+
+        if (!firebaseUser.email) return HttpResponse.error('A Firebase user needs an email before application access can be assigned.', 400);
+        const email = firebaseUser.email.trim().toLowerCase();
+        const linkedRows = await env.DB.prepare(`
+            SELECT id, firebase_uid, email, role FROM application_users
+            WHERE email = ? COLLATE NOCASE OR firebase_uid = ?
+        `).bind(email, firebaseUser.uid).all();
+        const emailRow = (linkedRows.results || []).find((row: any) => String(row.email).toLowerCase() === email);
+        const uidRow = (linkedRows.results || []).find((row: any) => row.firebase_uid === firebaseUser.uid);
+        if (emailRow && uidRow && emailRow.id !== uidRow.id) {
+            return HttpResponse.error('This Firebase account and email are attached to separate application records. Reconcile them before changing the role.', 409);
+        }
+
+        const existingRow = emailRow || uidRow;
+        if (role === 'user') {
+            const otherAdmins = await env.DB.prepare(`
+                SELECT COUNT(*) AS total FROM application_users
+                WHERE role = 'admin' AND status = 'active'
+                AND email != ? COLLATE NOCASE
+            `).bind(email).first() as { total?: number } | null;
+            if (!Number(otherAdmins?.total || 0)) {
+                return HttpResponse.error('The last active admin cannot be changed to a user. Promote another account first.', 409);
+            }
+        }
+
+        if (existingRow) {
+            await env.DB.prepare(`
+                UPDATE application_users
+                SET firebase_uid = ?, name = ?, email = ?, phone = ?, role = ?, status = 'active', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).bind(firebaseUser.uid, firebaseUser.displayName || email.split('@')[0], email, firebaseUser.phoneNumber || '', role, existingRow.id).run();
+        } else {
+            await env.DB.prepare(`
+                INSERT INTO application_users (id, firebase_uid, name, email, phone, role, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'active')
+            `).bind(crypto.randomUUID(), firebaseUser.uid, firebaseUser.displayName || email.split('@')[0], email, firebaseUser.phoneNumber || '', role).run();
+        }
+
+        return HttpResponse.json({ success: true, role });
+    }
+
+    private static async setFirebaseUserPermissions(request: Request, env: Env, uid: string): Promise<Response> {
+        const admin = await requireAdmin(request, env);
+        if (admin instanceof Response) return admin;
+
+        const body = await jsonBody(request);
+        if (!uid || !body.permissions || typeof body.permissions !== 'object' || Array.isArray(body.permissions)) {
+            return HttpResponse.error('A section permission map is required.', 400);
+        }
+
+        const permissions = parseSectionPermissions(body.permissions);
+        if (!env.FIREBASE_CLIENT_EMAIL || !env.FIREBASE_PRIVATE_KEY) {
+            return HttpResponse.error('Firebase Admin credentials are not configured on the backend.', 503);
+        }
+        let firebaseUser;
+        try {
+            firebaseUser = await withFirebaseAdminAuth({
+                projectId: env.FIREBASE_PROJECT_ID || 'ccj-web',
+                clientEmail: env.FIREBASE_CLIENT_EMAIL,
+                privateKey: env.FIREBASE_PRIVATE_KEY,
+            }, (firebaseAuth) => firebaseAuth.getUser(uid));
+        } catch (error) {
+            const code = (error as { code?: string }).code;
+            if (code === 'auth/user-not-found') return notFound('Firebase user');
+            console.error(JSON.stringify({ message: 'Firebase account lookup for permission update failed', code: code || 'unknown' }));
+            return HttpResponse.error('Unable to verify the Firebase account. Retry after checking backend credentials.', 502);
+        }
+        if (!firebaseUser.email) return HttpResponse.error('This Firebase account needs an email before section permissions can be saved.', 400);
+        const email = firebaseUser.email.trim().toLowerCase();
+        const rows = await env.DB.prepare(`
+            SELECT id, firebase_uid, email FROM application_users
+            WHERE email = ? COLLATE NOCASE OR firebase_uid = ?
+        `).bind(email, firebaseUser.uid).all();
+        const emailRow = (rows.results || []).find((row: any) => String(row.email).toLowerCase() === email);
+        const uidRow = (rows.results || []).find((row: any) => row.firebase_uid === firebaseUser.uid);
+        if (emailRow && uidRow && emailRow.id !== uidRow.id) {
+            return HttpResponse.error('This Firebase account and email are attached to separate application records. Reconcile them before updating permissions.', 409);
+        }
+
+        const existingRow = emailRow || uidRow;
+        if (existingRow) {
+            await env.DB.prepare(`
+                UPDATE application_users
+                SET firebase_uid = ?, email = ?, permissions_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).bind(firebaseUser.uid, email, JSON.stringify(permissions), existingRow.id).run();
+        } else {
+            await env.DB.prepare(`
+                INSERT INTO application_users (id, firebase_uid, name, email, phone, role, status, permissions_json)
+                VALUES (?, ?, ?, ?, ?, 'user', 'inactive', ?)
+            `).bind(crypto.randomUUID(), firebaseUser.uid, firebaseUser.displayName || email.split('@')[0], email, firebaseUser.phoneNumber || '', JSON.stringify(permissions)).run();
+        }
+
+        return HttpResponse.json({ success: true, permissions });
+    }
+
     private static async setFirebaseUserEmployee(request: Request, env: Env, uid: string): Promise<Response> {
-        const denied = await this.authorized(request, env);
-        if (denied) return denied;
+        const admin = await requireAdmin(request, env);
+        if (admin instanceof Response) return admin;
         const body = await jsonBody(request);
         if (!uid || !body.email || typeof body.isEmployee !== 'boolean') return HttpResponse.error('Firebase UID, email, and employee selection are required', 400);
 
@@ -931,6 +1287,113 @@ export class ApiRouter {
         await env.DB.prepare('INSERT INTO users (id, name, email, phone, role, password_hash, password_salt) VALUES (?, ?, ?, ?, ?, ?, ?)')
             .bind(id, body.name, body.email, body.phone || '', body.role || 'user', passwordHash, passwordSalt).run();
         return HttpResponse.json({ id, name: body.name, email: body.email, phone: body.phone || '', role: body.role || 'user', status: 'active', created_at: new Date().toISOString() });
+    }
+
+    private static async provisionFirebaseUser(request: Request, env: Env): Promise<Response> {
+        const access = await requireSectionAccess(request, env, 'users', 'write');
+        if (access instanceof Response) return access;
+
+        const body = await jsonBody(request);
+        const name = typeof body.name === 'string' ? body.name.trim() : '';
+        const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+        const password = typeof body.password === 'string' ? body.password : '';
+        const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
+        if (!name || !email || !password || !phone) return HttpResponse.error('Full name, email, password, and phone number are required.', 400);
+        if (password.length < 6) return HttpResponse.error('Password must be at least 6 characters.', 400);
+        if (!/^\+[1-9]\d{7,14}$/.test(phone)) return HttpResponse.error('Enter the phone number in international format, for example +14155552671.', 400);
+        if (!env.FIREBASE_CLIENT_EMAIL || !env.FIREBASE_PRIVATE_KEY) {
+            return HttpResponse.error('Firebase Admin credentials are not configured on the backend.', 503);
+        }
+
+        let firebaseUser;
+        let alreadyExisted = false;
+        const isAllowlistedAdmin = (env.ADMIN_EMAILS || '').split(',')
+            .map((allowedEmail) => allowedEmail.trim().toLowerCase())
+            .includes(email);
+        try {
+            firebaseUser = await withFirebaseAdminAuth({
+                projectId: env.FIREBASE_PROJECT_ID || 'ccj-web',
+                clientEmail: env.FIREBASE_CLIENT_EMAIL,
+                privateKey: env.FIREBASE_PRIVATE_KEY,
+            }, async (firebaseAuth) => {
+                try {
+                    const existing = await firebaseAuth.getUserByEmail(email);
+                    alreadyExisted = true;
+                    return firebaseAuth.updateUser(existing.uid, {
+                        displayName: name,
+                        phoneNumber: phone,
+                        ...(isAllowlistedAdmin ? { emailVerified: true } : {}),
+                    });
+                } catch (error) {
+                    const code = (error as { code?: string }).code;
+                    if (code === 'auth/email-already-exists') {
+                        const racedUser = await firebaseAuth.getUserByEmail(email);
+                        alreadyExisted = true;
+                        return firebaseAuth.updateUser(racedUser.uid, {
+                            displayName: name,
+                            phoneNumber: phone,
+                            ...(isAllowlistedAdmin ? { emailVerified: true } : {}),
+                        });
+                    }
+                    if (code !== 'auth/user-not-found') throw error;
+                    return await firebaseAuth.createUser({
+                        email,
+                        password,
+                        displayName: name,
+                        phoneNumber: phone,
+                        emailVerified: isAllowlistedAdmin,
+                    });
+                }
+            });
+        } catch (error) {
+            const code = (error as { code?: string }).code;
+            if (code === 'auth/email-already-exists') {
+                return HttpResponse.error('An account with this email already exists. Refresh the Users list and retry to link its application access.', 409);
+            }
+            console.error(JSON.stringify({ message: 'Firebase Admin user provisioning failed', code: code || 'unknown' }));
+            return HttpResponse.error('Firebase could not create or find the account. Check backend Firebase Admin credentials and permissions, then retry.', 502);
+        }
+
+        try {
+            const firebaseEmail = firebaseUser.email?.trim().toLowerCase();
+            if (!firebaseEmail || firebaseEmail !== email) {
+                return HttpResponse.error('Firebase returned an account with a different email. No application access was changed.', 409);
+            }
+
+            const linkedRows = await env.DB.prepare(`
+                SELECT id, firebase_uid, email FROM application_users
+                WHERE email = ? COLLATE NOCASE OR firebase_uid = ?
+            `).bind(email, firebaseUser.uid).all();
+            const emailRow = (linkedRows.results || []).find((row: any) => String(row.email).toLowerCase() === email);
+            const uidRow = (linkedRows.results || []).find((row: any) => row.firebase_uid === firebaseUser.uid);
+
+            if (emailRow && uidRow && emailRow.id !== uidRow.id) {
+                return HttpResponse.error('The Firebase account and application email are attached to separate database records. Ask an administrator to reconcile those records before retrying.', 409);
+            }
+
+            const row = emailRow || uidRow;
+            if (row) {
+                await env.DB.prepare(`
+                    UPDATE application_users
+                    SET firebase_uid = ?, name = ?, email = ?, phone = ?, status = 'active', updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                `).bind(firebaseUser.uid, name, email, phone, row.id).run();
+            } else {
+                await env.DB.prepare(`
+                    INSERT INTO application_users (id, firebase_uid, name, email, phone, role, status)
+                    VALUES (?, ?, ?, ?, ?, 'user', 'active')
+                `).bind(crypto.randomUUID(), firebaseUser.uid, name, email, phone).run();
+            }
+        } catch (error) {
+            console.error(JSON.stringify({ message: 'Application user record could not be saved after Firebase provisioning', uid: firebaseUser.uid }));
+            return HttpResponse.error('Firebase account exists, but application access was not saved. Retry Create User with the same email and password to safely complete registration; an existing Firebase password is never changed by a retry.', 503);
+        }
+
+        return HttpResponse.json({
+            success: true,
+            user: { id: firebaseUser.uid, name, email, phone, role: 'user', status: 'active' },
+            recoveredExistingFirebaseAccount: alreadyExisted,
+        }, alreadyExisted ? 200 : 201);
     }
 
     private static async userByPath(request: Request, env: Env, rawPath: string): Promise<Response> {
@@ -1076,8 +1539,19 @@ export class ApiRouter {
     }
 
     private static async getProfile(request: Request, env: Env): Promise<Response> {
-        const auth = await requireAdmin(request, env);
-        return auth instanceof Response ? auth : HttpResponse.json({ id: auth.uid, name: auth.name, email: auth.email, photoURL: auth.photoURL, role: 'admin' });
+        const access = await requireApplicationUser(request, env);
+        return access instanceof Response ? access : HttpResponse.json({
+            id: access.user.uid,
+            name: access.applicationUser.name || access.user.name,
+            email: access.applicationUser.email,
+            phone: access.applicationUser.phone,
+            photoURL: access.user.photoURL,
+            role: access.applicationUser.role,
+            status: access.applicationUser.status,
+            permissions: access.applicationUser.role === 'admin'
+                ? adminSectionPermissions()
+                : parseSectionPermissions(access.applicationUser.permissions_json),
+        });
     }
 
     private static async uploadFile(request: Request, env: Env): Promise<Response> {
