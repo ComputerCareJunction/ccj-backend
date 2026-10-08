@@ -11,7 +11,8 @@
     "d1:migrate:firebase-employees": "wrangler d1 execute ccj-api --remote --file=migrations/0003_firebase_employee_link.sql",
     "d1:migrate:careers": "wrangler d1 execute ccj-api --remote --file=migrations/0004_careers.sql",
     "d1:migrate:application-users": "wrangler d1 execute ccj-api --remote --file=migrations/0005_application_user_access.sql",
-    "d1:migrate:section-permissions": "wrangler d1 execute ccj-api --remote --file=migrations/0006_section_permissions.sql"
+    "d1:migrate:section-permissions": "wrangler d1 execute ccj-api --remote --file=migrations/0006_section_permissions.sql",
+    "d1:migrate:tickets": "wrangler d1 execute ccj-api --remote --file=migrations/0007_ticket_serials_and_timestamps.sql"
   },
   "keywords": [
     "api",

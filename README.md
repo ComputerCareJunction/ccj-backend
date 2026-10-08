@@ -16,8 +16,11 @@ npm run d1:migrate:firebase-employees
 npm run d1:migrate:careers
 npm run d1:migrate:application-users
 npm run d1:migrate:section-permissions
+npm run d1:migrate:tickets
 npm run deploy
 ```
+
+The ticket migration assigns existing support tickets sequential `CCJ-01` style numbers and initializes the ticket number sequence. Apply it before deploying the Worker code that creates tickets with sequential numbers.
 
 Section permissions are stored on each application user as read/write grants for Products, Orders, Tickets, Users, Employees, Leads, and Resources. Write grants include read access. Admins always have full access; standard users receive no section grants until an admin configures them in the Users screen.
 

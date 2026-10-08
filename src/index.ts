@@ -779,7 +779,9 @@ export class ApiRouter {
     private static async createTicket(request: Request, env: Env): Promise<Response> {
         const body = await jsonBody(request);
         const id = crypto.randomUUID();
-        const ticketNumber = `CCJ-TKT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        const sequence = await env.DB.prepare('UPDATE ticket_sequence SET current_value = current_value + 1 WHERE id = 1 RETURNING current_value').first() as { current_value?: number } | null;
+        if (!sequence?.current_value) return HttpResponse.error('Ticket numbering is unavailable', 500);
+        const ticketNumber = `CCJ-${String(sequence.current_value).padStart(2, '0')}`;
         const name = body.requested_by || body.customer_name || body.customerName || body.name || body.ticket_name || '';
         const ticketName = body.ticket_name || body.serviceType || body.ticket_type || 'Support request';
         const service = body.ticket_type || body.serviceType || 'General';
