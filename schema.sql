@@ -109,3 +109,37 @@ INSERT OR IGNORE INTO career_openings (id, title, department, location, employme
 ('career-web-developer', 'Web Developer', 'Development', 'Remote / Mumbai', 'Full-time', 'Join our development team as a Web Developer. You will work on building and maintaining web applications for our clients using modern web technologies.'),
 ('career-network-engineer', 'Network Engineer', 'Network Infrastructure', 'Mumbai, Maharashtra', 'Full-time', 'We are seeking a Network Engineer to design, implement, and maintain network infrastructure for our clients. Experience with network security is preferred.'),
 ('career-sales-representative', 'Sales Representative', 'Sales', 'Mumbai, Maharashtra', 'Full-time', 'Join our sales team and help grow our business by building relationships with clients and promoting our IT services and solutions.');
+
+-- 8. Assets (Purchase, Sales and Available Stock)
+CREATE TABLE IF NOT EXISTS assets (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    bill_no TEXT NOT NULL,
+    movement TEXT NOT NULL CHECK(movement IN ('Purchase', 'Sales')),
+    item TEXT NOT NULL,
+    category TEXT NOT NULL,
+    qty INTEGER NOT NULL CHECK(qty > 0),
+    unit_amount REAL NOT NULL CHECK(unit_amount >= 0),
+    total_amount REAL NOT NULL CHECK(total_amount >= 0),
+    vendor TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Completed',
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_assets_date ON assets(date);
+CREATE INDEX IF NOT EXISTS idx_assets_movement ON assets(movement);
+CREATE INDEX IF NOT EXISTS idx_assets_category ON assets(category);
+CREATE INDEX IF NOT EXISTS idx_assets_bill_no ON assets(bill_no);
+
+INSERT OR IGNORE INTO assets (id, date, bill_no, movement, item, category, qty, unit_amount, total_amount, vendor, status, notes) VALUES
+('ast-001', '2026-10-01', 'CCJ-PUR-1001', 'Purchase', 'Dell Latitude 5490 (Refurbished i5 8th Gen)', 'Laptops', 15, 18000.00, 270000.00, 'Metro Tech Distributors', 'Completed', 'Lot of Grade A business laptops with chargers'),
+('ast-002', '2026-10-03', 'CCJ-PUR-1002', 'Purchase', 'HP EliteBook 840 G5 (i5 8th Gen 16GB)', 'Laptops', 10, 20000.00, 200000.00, 'Infoway Systems Pvt Ltd', 'Completed', 'Tested working units, battery health > 85%'),
+('ast-003', '2026-10-05', 'CCJ-SAL-2001', 'Sales', 'Dell Latitude 5490 (Refurbished i5 8th Gen)', 'Laptops', 4, 24999.00, 99996.00, 'Apex Solutions Ltd', 'Completed', 'Supplied for new client project batch 1'),
+('ast-004', '2026-10-07', 'CCJ-PUR-1003', 'Purchase', 'Hikvision 4CH HD CCTV Kit with 1TB HDD', 'CCTV & Security', 8, 11500.00, 92000.00, 'Security Vision Corp', 'Completed', 'Complete camera kits with BNC connectors'),
+('ast-005', '2026-10-10', 'CCJ-SAL-2002', 'Sales', 'HP EliteBook 840 G5 (i5 8th Gen 16GB)', 'Laptops', 3, 26999.00, 80997.00, 'BlueChip Technologies', 'Completed', 'Invoice sent, paid via NEFT'),
+('ast-006', '2026-10-11', 'CCJ-SAL-2003', 'Sales', 'Hikvision 4CH HD CCTV Kit with 1TB HDD', 'CCTV & Security', 2, 14999.00, 29998.00, 'Greenfield Realty Office', 'Completed', 'Installed at site by CCJ engineering team'),
+('ast-007', '2026-10-14', 'CCJ-PUR-1004', 'Purchase', 'Custom Workstation PC (Core i7 12th Gen / 32GB / RTX 3060)', 'Desktops', 5, 42000.00, 210000.00, 'Prime PC Components', 'Completed', 'High performance rendering workstations'),
+('ast-008', '2026-10-15', 'CCJ-SAL-2004', 'Sales', 'Dell Latitude 5490 (Refurbished i5 8th Gen)', 'Laptops', 2, 24999.00, 49998.00, 'Sunrise Digital Studio', 'Completed', 'Corporate order dispatched');
+

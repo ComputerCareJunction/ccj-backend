@@ -299,11 +299,11 @@ type AuthenticatedUser = {
     emailVerified: boolean;
 };
 
-type DashboardSection = 'products' | 'orders' | 'tickets' | 'users' | 'employees' | 'leads' | 'resources';
+type DashboardSection = 'products' | 'orders' | 'tickets' | 'users' | 'employees' | 'leads' | 'resources' | 'assets';
 type SectionPermission = { read: boolean; write: boolean };
 type SectionPermissions = Record<DashboardSection, SectionPermission>;
 
-const DASHBOARD_SECTIONS: DashboardSection[] = ['products', 'orders', 'tickets', 'users', 'employees', 'leads', 'resources'];
+const DASHBOARD_SECTIONS: DashboardSection[] = ['products', 'orders', 'tickets', 'users', 'employees', 'leads', 'resources', 'assets'];
 
 const emptySectionPermissions = (): SectionPermissions => Object.fromEntries(
     DASHBOARD_SECTIONS.map((section) => [section, { read: false, write: false }])
@@ -340,6 +340,7 @@ const sectionForPath = (path: string): DashboardSection | null => {
     if (path.startsWith('/employees') || path.startsWith('/attendance')) return 'employees';
     if (path.startsWith('/contact')) return 'leads';
     if (path.startsWith('/blogs') || path.startsWith('/careers')) return 'resources';
+    if (path.startsWith('/assets')) return 'assets';
     return null;
 };
 
@@ -655,6 +656,10 @@ export class ApiRouter {
         if (path === '/attendance' && method === 'GET') return this.getAttendance(request, env, url);
         if (path === '/attendance' && method === 'POST') return this.createAttendance(request, env);
         if (path.startsWith('/attendance/')) return this.deleteAttendance(request, env, routeId(path, '/attendance/'));
+        if (path === '/assets' && method === 'GET') return this.getAssets(request, env, url);
+        if (path === '/assets' && method === 'POST') return this.createAsset(request, env);
+        if (path === '/assets/stock' && method === 'GET') return this.getAssetStock(request, env);
+        if (path.startsWith('/assets/')) return this.assetById(request, env, routeId(path, '/assets/'));
         if (path === '/auth/profile' && method === 'GET') return this.getProfile(request, env);
         if (path === '/auth/access' && method === 'GET') return this.getApplicationAccess(request, env);
 
@@ -726,6 +731,7 @@ export class ApiRouter {
             env.DB.prepare("SELECT COUNT(*) AS total FROM career_openings WHERE status = 'active'").first(),
             env.DB.prepare('SELECT COUNT(*) AS total FROM employees').first(),
             env.DB.prepare('SELECT (SELECT COUNT(*) FROM contact_submissions) + (SELECT COUNT(*) FROM consultations) AS total').first(),
+            env.DB.prepare('SELECT COUNT(*) AS total FROM assets').first().catch(() => ({ total: 0 })),
         ]);
 
         return HttpResponse.json({
@@ -737,6 +743,7 @@ export class ApiRouter {
             employees: permissions.employees.read ? Number(counts[5]?.total || 0) : 0,
             leads: permissions.leads.read ? Number(counts[6]?.total || 0) : 0,
             users: permissions.users.read ? Number((await env.DB.prepare('SELECT COUNT(*) AS total FROM application_users').first() as { total?: number } | null)?.total || 0) : 0,
+            assets: permissions.assets?.read ? Number((counts[7] as any)?.total || 0) : 0,
         });
     }
 
@@ -1565,6 +1572,192 @@ export class ApiRouter {
         await env.STORAGE.put(fileName, file.stream(), { httpMetadata: { contentType: file.type || 'application/octet-stream' } });
         const fileUrl = new URL(`/api/storage/${encodeURIComponent(fileName)}`, request.url).toString();
         return HttpResponse.json({ success: true, fileName, url: fileUrl });
+    }
+
+    private static async ensureAssetsTable(env: Env): Promise<void> {
+        try {
+            await env.DB.prepare(`
+                CREATE TABLE IF NOT EXISTS assets (
+                    id TEXT PRIMARY KEY,
+                    date TEXT NOT NULL,
+                    bill_no TEXT NOT NULL,
+                    movement TEXT NOT NULL CHECK(movement IN ('Purchase', 'Sales')),
+                    item TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    qty INTEGER NOT NULL CHECK(qty > 0),
+                    unit_amount REAL NOT NULL CHECK(unit_amount >= 0),
+                    total_amount REAL NOT NULL CHECK(total_amount >= 0),
+                    vendor TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'Completed',
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            `).run();
+        } catch {}
+    }
+
+    private static async getAssets(request: Request, env: Env, url: URL): Promise<Response> {
+        const denied = await this.authorized(request, env);
+        if (denied) return denied;
+        await this.ensureAssetsTable(env);
+
+        const movement = url.searchParams.get('movement');
+        const category = url.searchParams.get('category');
+        const status = url.searchParams.get('status');
+        const search = url.searchParams.get('search');
+
+        let query = 'SELECT * FROM assets WHERE 1=1';
+        const params: any[] = [];
+
+        if (movement && movement !== 'all') {
+            query += ' AND movement = ?';
+            params.push(movement);
+        }
+        if (category && category !== 'all') {
+            query += ' AND category = ?';
+            params.push(category);
+        }
+        if (status && status !== 'all') {
+            query += ' AND status = ?';
+            params.push(status);
+        }
+        if (search && search.trim()) {
+            query += ' AND (item LIKE ? OR bill_no LIKE ? OR vendor LIKE ?)';
+            const term = `%${search.trim()}%`;
+            params.push(term, term, term);
+        }
+
+        query += ' ORDER BY date DESC, created_at DESC';
+
+        try {
+            const stmt = params.length > 0 ? env.DB.prepare(query).bind(...params) : env.DB.prepare(query);
+            const result = await stmt.all();
+            return HttpResponse.json(result.results || []);
+        } catch {
+            return HttpResponse.json([]);
+        }
+    }
+
+    private static async createAsset(request: Request, env: Env): Promise<Response> {
+        const denied = await this.authorized(request, env);
+        if (denied) return denied;
+        await this.ensureAssetsTable(env);
+
+        const body = await jsonBody(request);
+        const { date, bill_no, movement, item, category, qty, unit_amount, total_amount, vendor, status, notes } = body;
+
+        if (!date || !bill_no || !movement || !item || !category || qty === undefined || unit_amount === undefined || !vendor) {
+            return HttpResponse.error('Date, bill number, movement, item, category, qty, unit amount, and vendor are required', 400);
+        }
+
+        const parsedQty = Math.max(1, parseInt(String(qty), 10) || 1);
+        const parsedUnitAmount = Math.max(0, parseFloat(String(unit_amount)) || 0);
+        const calculatedTotal = total_amount !== undefined && total_amount !== null && !isNaN(Number(total_amount))
+            ? Math.max(0, Number(total_amount))
+            : (parsedQty * parsedUnitAmount);
+        const id = body.id || `ast_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+        await env.DB.prepare(`
+            INSERT INTO assets (id, date, bill_no, movement, item, category, qty, unit_amount, total_amount, vendor, status, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+            id,
+            String(date).slice(0, 10),
+            String(bill_no).trim(),
+            movement === 'Sales' ? 'Sales' : 'Purchase',
+            String(item).trim(),
+            String(category).trim(),
+            parsedQty,
+            parsedUnitAmount,
+            calculatedTotal,
+            String(vendor).trim(),
+            String(status || 'Completed').trim(),
+            notes ? String(notes).trim() : null
+        ).run();
+
+        const created = await env.DB.prepare('SELECT * FROM assets WHERE id = ?').bind(id).first();
+        return HttpResponse.json(created || { success: true, id }, 201);
+    }
+
+    private static async assetById(request: Request, env: Env, id: string): Promise<Response> {
+        const denied = await this.authorized(request, env);
+        if (denied) return denied;
+        await this.ensureAssetsTable(env);
+        const decodedId = decodeURIComponent(id);
+
+        if (request.method === 'GET') {
+            const asset = await env.DB.prepare('SELECT * FROM assets WHERE id = ?').bind(decodedId).first();
+            return asset ? HttpResponse.json(asset) : notFound('Asset entry');
+        }
+
+        if (request.method === 'PUT') {
+            const body = await jsonBody(request);
+            const { date, bill_no, movement, item, category, qty, unit_amount, total_amount, vendor, status, notes } = body;
+            const parsedQty = Math.max(1, parseInt(String(qty), 10) || 1);
+            const parsedUnitAmount = Math.max(0, parseFloat(String(unit_amount)) || 0);
+            const calculatedTotal = total_amount !== undefined && total_amount !== null && !isNaN(Number(total_amount))
+                ? Math.max(0, Number(total_amount))
+                : (parsedQty * parsedUnitAmount);
+
+            const result = await env.DB.prepare(`
+                UPDATE assets SET
+                    date = ?, bill_no = ?, movement = ?, item = ?, category = ?,
+                    qty = ?, unit_amount = ?, total_amount = ?, vendor = ?, status = ?, notes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).bind(
+                String(date).slice(0, 10),
+                String(bill_no).trim(),
+                movement === 'Sales' ? 'Sales' : 'Purchase',
+                String(item).trim(),
+                String(category).trim(),
+                parsedQty,
+                parsedUnitAmount,
+                calculatedTotal,
+                String(vendor).trim(),
+                String(status || 'Completed').trim(),
+                notes ? String(notes).trim() : null,
+                decodedId
+            ).run();
+
+            if (!result.meta.changes) return notFound('Asset entry');
+            const updated = await env.DB.prepare('SELECT * FROM assets WHERE id = ?').bind(decodedId).first();
+            return HttpResponse.json(updated);
+        }
+
+        if (request.method === 'DELETE') {
+            const result = await env.DB.prepare('DELETE FROM assets WHERE id = ?').bind(decodedId).run();
+            return result.meta.changes ? HttpResponse.json({ success: true, id: decodedId }) : notFound('Asset entry');
+        }
+
+        return HttpResponse.error('Method not allowed', 405);
+    }
+
+    private static async getAssetStock(request: Request, env: Env): Promise<Response> {
+        const denied = await this.authorized(request, env);
+        if (denied) return denied;
+        await this.ensureAssetsTable(env);
+
+        try {
+            const result = await env.DB.prepare(`
+                SELECT
+                    item,
+                    category,
+                    SUM(CASE WHEN movement = 'Purchase' THEN qty ELSE 0 END) AS total_purchased_qty,
+                    SUM(CASE WHEN movement = 'Purchase' THEN total_amount ELSE 0 END) AS total_purchased_amount,
+                    SUM(CASE WHEN movement = 'Sales' THEN qty ELSE 0 END) AS total_sold_qty,
+                    SUM(CASE WHEN movement = 'Sales' THEN total_amount ELSE 0 END) AS total_sold_amount,
+                    (SUM(CASE WHEN movement = 'Purchase' THEN qty ELSE 0 END) - SUM(CASE WHEN movement = 'Sales' THEN qty ELSE 0 END)) AS available_stock
+                FROM assets
+                GROUP BY item, category
+                ORDER BY item ASC
+            `).all();
+
+            return HttpResponse.json(result.results || []);
+        } catch {
+            return HttpResponse.json([]);
+        }
     }
 }
 
